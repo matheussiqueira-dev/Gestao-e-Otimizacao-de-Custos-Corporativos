@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: costintel-postgres
+    environment:
+      POSTGRES_USER: cost_user
+      POSTGRES_PASSWORD: cost_pass
+      POSTGRES_DB: costintel
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./db/seeds/seed_data.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+      - ./db/bi_views.sql:/docker-entrypoint-initdb.d/03_views.sql:ro
+
+  redis:
+    image: redis:7
+    container_name: costintel-redis
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./backend
+    container_name: costintel-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://cost_user:cost_pass@postgres:5432/costintel
+      REDIS_URL: redis://redis:6379/0
+      CACHE_ENABLED: "true"
+      CACHE_TTL_SECONDS: "300"
+      ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: costintel-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_SUPERSET_EMBED_URL: http://localhost:8088/superset/welcome/
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+  superset:
+    image: apache/superset:3.1.1
+    container_name: costintel-superset
+    profiles: ["bi"]
+    environment:
+      SUPERSET_SECRET_KEY: cost-intel-secret-key
+      SUPERSET_DATABASE_URI: postgresql+psycopg2://cost_user:cost_pass@postgres:5432/costintel
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8088:8088"
+    command: >
+      /bin/sh -c "
+      superset db upgrade &&
+      superset fab create-admin --username admin --firstname Cost --lastname Admin --email admin@costintel.local --password admin || true &&
+      superset init &&
+      superset run -h 0.0.0.0 -p 8088 --with-threads"
+
+volumes:
+  postgres_data:
+
