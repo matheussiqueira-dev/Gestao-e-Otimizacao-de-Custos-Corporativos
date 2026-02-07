@@ -4,13 +4,15 @@ from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_api_key
 from app.core.cache import cache
 from app.db.session import get_db
 from app.repositories import CostRepository
 from app.schemas.analytics import AnomalyDetectionResponse, WasteRankingResponse
+from app.schemas.opportunities import QuickWinsResponse
 from app.services import AnalyticsService
 
-router = APIRouter(tags=["analytics"])
+router = APIRouter(tags=["analytics"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/waste/ranking", response_model=WasteRankingResponse)
@@ -71,3 +73,38 @@ def detect_anomalies(
     cache.set_json(key, response.model_dump(mode="json"))
     return response
 
+
+@router.get("/opportunities/quick-wins", response_model=QuickWinsResponse)
+def get_quick_wins(
+    end_date: date | None = Query(default=None),
+    lookback_months: int = Query(default=6, ge=2, le=24),
+    target_reduction_percent: float = Query(default=8.0, ge=1.0, le=30.0),
+    minimum_total: float = Query(default=10000.0, ge=1000.0),
+    top_n: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+) -> QuickWinsResponse | dict:
+    period_end = end_date or date.today()
+    period_start = period_end - relativedelta(months=lookback_months) + relativedelta(days=1)
+
+    key = cache.build_key(
+        "analytics:quick_wins",
+        period_start=period_start.isoformat(),
+        period_end=period_end.isoformat(),
+        target_reduction_percent=target_reduction_percent,
+        minimum_total=minimum_total,
+        top_n=top_n,
+    )
+    cached = cache.get_json(key)
+    if cached:
+        return cached
+
+    service = AnalyticsService(CostRepository(db))
+    response = service.quick_wins(
+        period_start=period_start,
+        period_end=period_end,
+        target_reduction_percent=target_reduction_percent,
+        minimum_total=minimum_total,
+        top_n=top_n,
+    )
+    cache.set_json(key, response.model_dump(mode="json"))
+    return response

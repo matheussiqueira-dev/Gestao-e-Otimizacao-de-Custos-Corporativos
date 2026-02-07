@@ -37,6 +37,42 @@ export type WasteRankingResponse = {
   items: WasteRankingItem[];
 };
 
+export type AnomalyItem = {
+  month: string;
+  cost_center: string;
+  category: string;
+  amount: number;
+  baseline_mean: number;
+  baseline_std: number;
+  z_score: number;
+};
+
+export type AnomalyDetectionResponse = {
+  period_start: string;
+  period_end: string;
+  threshold_z: number;
+  items: AnomalyItem[];
+};
+
+export type QuickWinOpportunity = {
+  cost_center: string;
+  category: string;
+  period_total: number;
+  monthly_average: number;
+  trend_percent: number;
+  volatility: number;
+  opportunity_score: number;
+  estimated_savings: number;
+};
+
+export type QuickWinsResponse = {
+  period_start: string;
+  period_end: string;
+  target_reduction_percent: number;
+  minimum_total: number;
+  items: QuickWinOpportunity[];
+};
+
 export type ImpactRankingItem = {
   entity_id: number;
   entity_name: string;
@@ -66,4 +102,3 @@ export type SimulationCutCategory = {
   percent_cut: number;
   absolute_cut: number;
 };
-

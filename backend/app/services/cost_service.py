@@ -6,6 +6,7 @@ from typing import Any
 from app.repositories.cost_repository import AggregationDimension, CostRepository
 from app.schemas.analytics import AnomalyDetectionResponse, AnomalyItem, WasteRankingItem, WasteRankingResponse
 from app.schemas.costs import CostAggregateResponse, CostFilters, CostOverviewResponse
+from app.schemas.opportunities import QuickWinOpportunity, QuickWinsResponse
 from app.schemas.simulations import ImpactRankingItem, SimulationRequest, SimulationResponse
 
 
@@ -63,16 +64,16 @@ class SimulationService:
 
             buckets.append({**bucket, "baseline_amount": baseline, "projected_amount": projected})
 
-        self._apply_absolute_center_cuts(buckets, center_abs)
-        self._apply_absolute_category_cuts(buckets, category_abs)
+        self._apply_absolute_cuts(buckets, center_abs, "cost_center_id")
+        self._apply_absolute_cuts(buckets, category_abs, "category_id")
 
         baseline_total = round(sum(item["baseline_amount"] for item in buckets), 2)
         projected_total = round(sum(item["projected_amount"] for item in buckets), 2)
         estimated_savings = round(max(0.0, baseline_total - projected_total), 2)
         impact_percent = round((estimated_savings / baseline_total) * 100, 2) if baseline_total else 0.0
 
-        center_ranking = self._build_center_ranking(buckets)
-        category_ranking = self._build_category_ranking(buckets)
+        center_ranking = self._build_entity_ranking(buckets, "cost_center_id", "cost_center_name")
+        category_ranking = self._build_entity_ranking(buckets, "category_id", "category_name")
 
         return SimulationResponse(
             baseline_total=baseline_total,
@@ -84,15 +85,19 @@ class SimulationService:
         )
 
     @staticmethod
-    def _apply_absolute_center_cuts(buckets: list[dict[str, Any]], center_abs: dict[int, float]) -> None:
-        if not center_abs:
+    def _apply_absolute_cuts(
+        buckets: list[dict[str, Any]],
+        absolute_cuts: dict[int, float],
+        group_key: str,
+    ) -> None:
+        if not absolute_cuts:
             return
         grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for bucket in buckets:
-            grouped[bucket["cost_center_id"]].append(bucket)
+            grouped[bucket[group_key]].append(bucket)
 
-        for cost_center_id, absolute_cut in center_abs.items():
-            selected = grouped.get(cost_center_id, [])
+        for entity_id, absolute_cut in absolute_cuts.items():
+            selected = grouped.get(entity_id, [])
             current_total = sum(item["projected_amount"] for item in selected)
             if current_total <= 0:
                 continue
@@ -101,68 +106,22 @@ class SimulationService:
                 item["projected_amount"] = item["projected_amount"] * (1 - factor)
 
     @staticmethod
-    def _apply_absolute_category_cuts(buckets: list[dict[str, Any]], category_abs: dict[int, float]) -> None:
-        if not category_abs:
-            return
-        grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
-        for bucket in buckets:
-            grouped[bucket["category_id"]].append(bucket)
-
-        for category_id, absolute_cut in category_abs.items():
-            selected = grouped.get(category_id, [])
-            current_total = sum(item["projected_amount"] for item in selected)
-            if current_total <= 0:
-                continue
-            factor = min(1.0, absolute_cut / current_total)
-            for item in selected:
-                item["projected_amount"] = item["projected_amount"] * (1 - factor)
-
-    @staticmethod
-    def _build_center_ranking(buckets: list[dict[str, Any]]) -> list[ImpactRankingItem]:
+    def _build_entity_ranking(
+        buckets: list[dict[str, Any]],
+        entity_id_field: str,
+        entity_name_field: str,
+    ) -> list[ImpactRankingItem]:
         aggregates: dict[int, dict[str, Any]] = {}
         for item in buckets:
-            center_id = item["cost_center_id"]
-            if center_id not in aggregates:
-                aggregates[center_id] = {
-                    "name": item["cost_center_name"],
+            entity_id = item[entity_id_field]
+            if entity_id not in aggregates:
+                aggregates[entity_id] = {
+                    "name": item[entity_name_field],
                     "baseline": 0.0,
                     "projected": 0.0,
                 }
-            aggregates[center_id]["baseline"] += item["baseline_amount"]
-            aggregates[center_id]["projected"] += item["projected_amount"]
-
-        ranking: list[ImpactRankingItem] = []
-        for entity_id, data in aggregates.items():
-            baseline = round(data["baseline"], 2)
-            projected = round(data["projected"], 2)
-            savings = round(max(0.0, baseline - projected), 2)
-            impact_percent = round((savings / baseline) * 100, 2) if baseline else 0.0
-            ranking.append(
-                ImpactRankingItem(
-                    entity_id=entity_id,
-                    entity_name=data["name"],
-                    baseline_amount=baseline,
-                    projected_amount=projected,
-                    estimated_savings=savings,
-                    impact_percent=impact_percent,
-                )
-            )
-        ranking.sort(key=lambda item: item.estimated_savings, reverse=True)
-        return ranking
-
-    @staticmethod
-    def _build_category_ranking(buckets: list[dict[str, Any]]) -> list[ImpactRankingItem]:
-        aggregates: dict[int, dict[str, Any]] = {}
-        for item in buckets:
-            category_id = item["category_id"]
-            if category_id not in aggregates:
-                aggregates[category_id] = {
-                    "name": item["category_name"],
-                    "baseline": 0.0,
-                    "projected": 0.0,
-                }
-            aggregates[category_id]["baseline"] += item["baseline_amount"]
-            aggregates[category_id]["projected"] += item["projected_amount"]
+            aggregates[entity_id]["baseline"] += item["baseline_amount"]
+            aggregates[entity_id]["projected"] += item["projected_amount"]
 
         ranking: list[ImpactRankingItem] = []
         for entity_id, data in aggregates.items():
@@ -271,4 +230,65 @@ class AnalyticsService:
             period_end=period_end,
             threshold_z=threshold_z,
             items=anomalies[:top_n],
+        )
+
+    def quick_wins(
+        self,
+        period_start: date,
+        period_end: date,
+        target_reduction_percent: float = 8.0,
+        minimum_total: float = 10000.0,
+        top_n: int = 10,
+    ) -> QuickWinsResponse:
+        monthly_data = self.repository.get_monthly_bucket_totals(period_start, period_end)
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for item in monthly_data:
+            grouped[(item["cost_center"], item["category"])].append(item)
+
+        portfolio_total = sum(item["total_amount"] for item in monthly_data)
+        opportunities: list[QuickWinOpportunity] = []
+
+        for (cost_center, category), rows in grouped.items():
+            rows = sorted(rows, key=lambda item: item["month"])
+            amounts = [row["total_amount"] for row in rows]
+            period_total = sum(amounts)
+            if period_total < minimum_total:
+                continue
+
+            monthly_average = period_total / max(1, len(amounts))
+            latest_amount = amounts[-1] if amounts else 0.0
+            baseline_samples = amounts[:-1] if len(amounts) > 1 else amounts
+            baseline_average = fmean(baseline_samples) if baseline_samples else 0.0
+            trend_percent = ((latest_amount - baseline_average) / baseline_average * 100) if baseline_average else 0.0
+
+            std = pstdev(amounts) if len(amounts) > 1 else 0.0
+            volatility = (std / monthly_average * 100) if monthly_average else 0.0
+            concentration = (period_total / portfolio_total) if portfolio_total else 0.0
+
+            spend_score = min(55.0, concentration * 140)
+            trend_score = min(30.0, max(0.0, trend_percent) * 0.7)
+            volatility_score = min(15.0, volatility * 0.35)
+            opportunity_score = round(spend_score + trend_score + volatility_score, 2)
+
+            estimated_savings = round(period_total * (target_reduction_percent / 100), 2)
+            opportunities.append(
+                QuickWinOpportunity(
+                    cost_center=cost_center,
+                    category=category,
+                    period_total=round(period_total, 2),
+                    monthly_average=round(monthly_average, 2),
+                    trend_percent=round(trend_percent, 2),
+                    volatility=round(volatility, 2),
+                    opportunity_score=opportunity_score,
+                    estimated_savings=estimated_savings,
+                )
+            )
+
+        opportunities.sort(key=lambda item: (item.opportunity_score, item.estimated_savings), reverse=True)
+        return QuickWinsResponse(
+            period_start=period_start,
+            period_end=period_end,
+            target_reduction_percent=target_reduction_percent,
+            minimum_total=minimum_total,
+            items=opportunities[:top_n],
         )

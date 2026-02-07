@@ -32,6 +32,9 @@ services:
       CACHE_ENABLED: "true"
       CACHE_TTL_SECONDS: "300"
       ALLOWED_ORIGINS: http://localhost:3000
+      AUTH_ENABLED: "false"
+      API_KEY_VALUE: costintel-dev-key
+      LOG_LEVEL: INFO
     depends_on:
       - postgres
       - redis
@@ -71,4 +74,3 @@ services:
 
 volumes:
   postgres_data:
-

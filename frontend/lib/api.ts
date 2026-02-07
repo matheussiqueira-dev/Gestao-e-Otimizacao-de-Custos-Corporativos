@@ -1,6 +1,8 @@
 import {
+  AnomalyDetectionResponse,
   CostOverviewResponse,
   DimensionItem,
+  QuickWinsResponse,
   SimulationCutCategory,
   SimulationCutCenter,
   SimulationResponse,
@@ -8,6 +10,8 @@ import {
 } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_TIMEOUT_MS = 20000;
+const PUBLIC_API_KEY = process.env.NEXT_PUBLIC_API_KEY;
 
 type QueryValue = string | number | undefined | null;
 
@@ -27,21 +31,35 @@ function appendParam(url: URL, key: string, value: QueryValue | QueryValue[]) {
 }
 
 async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {})
-    },
-    cache: "no-store"
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`API error (${response.status}): ${text}`);
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        ...(PUBLIC_API_KEY ? { "X-API-Key": PUBLIC_API_KEY } : {}),
+        ...(init?.method && init.method !== "GET" ? { "Content-Type": "application/json" } : {})
+      },
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`API error (${response.status}): ${text}`);
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("A API demorou para responder. Tente novamente.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return (await response.json()) as T;
 }
 
 export async function getCostOverview(params: {
@@ -66,6 +84,31 @@ export async function getWasteRanking(params: { endDate?: string; lookbackMonths
   appendParam(url, "lookback_months", params.lookbackMonths ?? 3);
   appendParam(url, "top_n", params.topN ?? 10);
   return fetchJSON<WasteRankingResponse>(url.pathname + url.search);
+}
+
+export async function getAnomalies(params: { endDate?: string; lookbackMonths?: number; thresholdZ?: number; topN?: number }) {
+  const url = new URL("/api/v1/anomalies/detect", API_BASE_URL);
+  appendParam(url, "end_date", params.endDate);
+  appendParam(url, "lookback_months", params.lookbackMonths ?? 12);
+  appendParam(url, "threshold_z", params.thresholdZ ?? 2);
+  appendParam(url, "top_n", params.topN ?? 20);
+  return fetchJSON<AnomalyDetectionResponse>(url.pathname + url.search);
+}
+
+export async function getQuickWins(params: {
+  endDate?: string;
+  lookbackMonths?: number;
+  targetReductionPercent?: number;
+  minimumTotal?: number;
+  topN?: number;
+}) {
+  const url = new URL("/api/v1/opportunities/quick-wins", API_BASE_URL);
+  appendParam(url, "end_date", params.endDate);
+  appendParam(url, "lookback_months", params.lookbackMonths ?? 6);
+  appendParam(url, "target_reduction_percent", params.targetReductionPercent ?? 8);
+  appendParam(url, "minimum_total", params.minimumTotal ?? 10000);
+  appendParam(url, "top_n", params.topN ?? 10);
+  return fetchJSON<QuickWinsResponse>(url.pathname + url.search);
 }
 
 export async function listCostCenters() {
@@ -96,4 +139,3 @@ export async function runSimulation(payload: {
     })
   });
 }
-

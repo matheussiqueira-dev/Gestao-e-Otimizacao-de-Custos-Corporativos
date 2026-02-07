@@ -1,59 +1,60 @@
+import { EmptyState, HeroSection, Panel } from "@/components/ui";
+
 const supersetEmbedUrl = process.env.NEXT_PUBLIC_SUPERSET_EMBED_URL;
 
 export default function BIPage() {
   return (
-    <section>
-      <div className="hero">
-        <h1>Camada BI Integrada (Apache Superset)</h1>
-        <p>
-          Dashboards de custos, tendência temporal e desperdícios podem ser consumidos no próprio portal para reduzir tempo entre análise e decisão.
-        </p>
-      </div>
+    <>
+      <HeroSection
+        eyebrow="BI Layer"
+        title="Integração analítica com Apache Superset"
+        description="Use dashboards compartilháveis para análises aprofundadas por área, tendência e fontes de desperdício sem sair do portal executivo."
+      />
 
-      <div className="grid panels-2">
-        <article className="panel">
-          <h2>Dashboards disponíveis</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Dashboard</th>
-                <th>Objetivo</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Visão geral de custos</td>
-                <td>Consolidação por período, centro, projeto e categoria.</td>
-              </tr>
-              <tr>
-                <td>Tendência temporal</td>
-                <td>Monitoramento de evolução mensal e sazonalidade.</td>
-              </tr>
-              <tr>
-                <td>Maiores desperdícios</td>
-                <td>Priorizar frentes com maior potencial de economia.</td>
-              </tr>
-            </tbody>
-          </table>
-        </article>
+      <section className="grid panels-grid">
+        <Panel title="Dashboards recomendados" subtitle="Conjunto mínimo para rotina de governança financeira semanal.">
+          <div className="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>Dashboard</th>
+                  <th>Decisão suportada</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Visão geral de custos</td>
+                  <td>Controle de execução orçamentária por dimensão.</td>
+                </tr>
+                <tr>
+                  <td>Tendência temporal</td>
+                  <td>Antecipação de sazonalidade e desvios relevantes.</td>
+                </tr>
+                <tr>
+                  <td>Maiores desperdícios</td>
+                  <td>Priorização de frentes com maior retorno financeiro.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Panel>
 
-        <article className="panel">
-          <h2>Integração embed</h2>
-          {!supersetEmbedUrl && (
-            <p>Defina `NEXT_PUBLIC_SUPERSET_EMBED_URL` no arquivo `.env.local` para exibir o dashboard embedado nesta tela.</p>
+        <Panel title="Embed do Superset" subtitle="A URL é configurada via variável de ambiente e pode apontar para dashboards standalone.">
+          {!supersetEmbedUrl ? (
+            <EmptyState>Defina `NEXT_PUBLIC_SUPERSET_EMBED_URL` no `.env.local` para habilitar o iframe do BI.</EmptyState>
+          ) : (
+            <div className="iframe-shell">
+              <iframe
+                title="Superset Dashboard"
+                src={supersetEmbedUrl}
+                width="100%"
+                height="460"
+                style={{ border: 0, display: "block" }}
+              />
+            </div>
           )}
-          {supersetEmbedUrl && (
-            <iframe
-              title="Superset Dashboard"
-              src={supersetEmbedUrl}
-              width="100%"
-              height="440"
-              style={{ border: "1px solid rgba(160, 203, 227, 0.25)", borderRadius: 12 }}
-            />
-          )}
-        </article>
-      </div>
-    </section>
+        </Panel>
+      </section>
+    </>
   );
 }
-

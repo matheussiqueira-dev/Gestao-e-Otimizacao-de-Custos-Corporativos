@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Source_Serif_4 } from "next/font/google";
-import Link from "next/link";
+
+import { TopNavigation } from "@/components/top-navigation";
 
 import "./globals.css";
 
@@ -18,28 +19,35 @@ const serif = Source_Serif_4({
 
 export const metadata: Metadata = {
   title: "Cost Intelligence Platform",
-  description: "Plataforma para gestão, simulação e otimização de custos corporativos."
+  description: "Plataforma para gestão, simulação e otimização de custos corporativos.",
+  keywords: ["gestão de custos", "otimização financeira", "cfo", "simulação de custos", "business intelligence"],
+  openGraph: {
+    title: "Cost Intelligence Platform",
+    description: "Plataforma para gestão, simulação e otimização de custos corporativos.",
+    type: "website",
+    locale: "pt_BR"
+  }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="pt-BR">
       <body className={`${sans.variable} ${serif.variable}`}>
-        <div className="app-background" />
+        <a href="#main-content" className="skip-link">
+          Pular para o conteúdo
+        </a>
+        <div className="app-backdrop" />
         <header className="topbar">
           <div className="topbar-brand">
-            <span className="brand-title">Cost Intelligence</span>
-            <span className="brand-subtitle">Visão executiva para CFOs</span>
+            <p className="brand-kicker">Cost Intelligence Platform</p>
+            <p className="brand-subtitle">Gestão orientada por impacto financeiro</p>
           </div>
-          <nav className="topbar-nav">
-            <Link href="/dashboard">Dashboard</Link>
-            <Link href="/simulacoes">Simulações</Link>
-            <Link href="/bi">BI Layer</Link>
-          </nav>
+          <TopNavigation />
         </header>
-        <main className="main-container">{children}</main>
+        <main id="main-content" className="main-container">
+          {children}
+        </main>
       </body>
     </html>
   );
 }
-

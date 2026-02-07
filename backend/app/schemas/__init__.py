@@ -1,5 +1,6 @@
 from app.schemas.analytics import AnomalyDetectionResponse, AnomalyItem, WasteRankingItem, WasteRankingResponse
 from app.schemas.costs import CostAggregateItem, CostAggregateResponse, CostFilters, CostOverviewResponse, DimensionItem
+from app.schemas.opportunities import QuickWinOpportunity, QuickWinsResponse
 from app.schemas.simulations import (
     CutByCategory,
     CutByCenter,
@@ -19,9 +20,10 @@ __all__ = [
     "CutByCenter",
     "DimensionItem",
     "ImpactRankingItem",
+    "QuickWinOpportunity",
+    "QuickWinsResponse",
     "SimulationRequest",
     "SimulationResponse",
     "WasteRankingItem",
     "WasteRankingResponse",
 ]
-

@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CostAggregateItem(BaseModel):
@@ -40,3 +40,8 @@ class CostFilters(BaseModel):
     project_ids: list[int] = Field(default_factory=list)
     category_ids: list[int] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "CostFilters":
+        if self.start_date > self.end_date:
+            raise ValueError("start_date must be <= end_date")
+        return self

@@ -1,36 +1,17 @@
 from datetime import date
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import build_cost_filters, require_api_key, validate_group_by
 from app.core.cache import cache
 from app.db.session import get_db
 from app.repositories import AggregationDimension, CostRepository
-from app.schemas.costs import CostAggregateResponse, CostFilters, CostOverviewResponse, DimensionItem
+from app.schemas.costs import CostAggregateResponse, CostOverviewResponse, DimensionItem
 from app.services import CostService
 
-router = APIRouter(tags=["costs"])
-
-VALID_GROUPS: set[str] = {"month", "cost_center", "project", "category"}
-
-
-def _build_filters(
-    start_date: date,
-    end_date: date,
-    cost_center_ids: list[int] | None,
-    project_ids: list[int] | None,
-    category_ids: list[int] | None,
-) -> CostFilters:
-    if start_date > end_date:
-        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
-    return CostFilters(
-        start_date=start_date,
-        end_date=end_date,
-        cost_center_ids=cost_center_ids or [],
-        project_ids=project_ids or [],
-        category_ids=category_ids or [],
-    )
+router = APIRouter(tags=["costs"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/costs/aggregate", response_model=CostAggregateResponse)
@@ -43,11 +24,9 @@ def get_aggregated_costs(
     category_ids: list[int] | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> CostAggregateResponse | dict:
-    invalid_groups = [item for item in group_by if item not in VALID_GROUPS]
-    if invalid_groups:
-        raise HTTPException(status_code=400, detail=f"Invalid group_by values: {invalid_groups}")
+    validate_group_by(group_by)
 
-    filters = _build_filters(start_date, end_date, cost_center_ids, project_ids, category_ids)
+    filters = build_cost_filters(start_date, end_date, cost_center_ids, project_ids, category_ids)
     key = cache.build_key(
         "costs:aggregate",
         start_date=start_date.isoformat(),
@@ -61,7 +40,7 @@ def get_aggregated_costs(
     if cached:
         return cached
 
-    valid_group_by = cast(list[AggregationDimension], [item for item in group_by if item in VALID_GROUPS])
+    valid_group_by = cast(list[AggregationDimension], group_by)
     service = CostService(CostRepository(db))
     response = service.aggregate_costs(filters, group_by=valid_group_by)
     cache.set_json(key, response.model_dump(mode="json"))
@@ -77,7 +56,7 @@ def get_cost_overview(
     category_ids: list[int] | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> CostOverviewResponse | dict:
-    filters = _build_filters(start_date, end_date, cost_center_ids, project_ids, category_ids)
+    filters = build_cost_filters(start_date, end_date, cost_center_ids, project_ids, category_ids)
     key = cache.build_key(
         "costs:overview",
         start_date=start_date.isoformat(),
