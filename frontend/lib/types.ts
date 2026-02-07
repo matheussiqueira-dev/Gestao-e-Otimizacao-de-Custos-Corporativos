@@ -91,6 +91,28 @@ export type SimulationResponse = {
   category_impact_ranking: ImpactRankingItem[];
 };
 
+export type SimulationComparisonScenario = {
+  scenario_name: string;
+  center_cuts: SimulationCutCenter[];
+  category_cuts: SimulationCutCategory[];
+};
+
+export type SimulationComparisonItem = {
+  scenario_name: string;
+  baseline_total: number;
+  projected_total: number;
+  estimated_savings: number;
+  impact_percent: number;
+  rank: number;
+};
+
+export type SimulationComparisonResponse = {
+  period_start: string;
+  period_end: string;
+  best_scenario: string | null;
+  items: SimulationComparisonItem[];
+};
+
 export type SimulationCutCenter = {
   cost_center_id: number;
   percent_cut: number;
@@ -101,4 +123,26 @@ export type SimulationCutCategory = {
   category_id: number;
   percent_cut: number;
   absolute_cut: number;
+};
+
+export type BudgetVarianceStatus = "over_budget" | "on_track" | "under_budget";
+
+export type BudgetVarianceItem = {
+  cost_center_id: number;
+  cost_center: string;
+  planned_amount: number;
+  actual_amount: number;
+  variance_amount: number;
+  variance_percent: number;
+  status: BudgetVarianceStatus;
+};
+
+export type BudgetVarianceResponse = {
+  period_start: string;
+  period_end: string;
+  tolerance_percent: number;
+  total_planned: number;
+  total_actual: number;
+  total_variance: number;
+  items: BudgetVarianceItem[];
 };

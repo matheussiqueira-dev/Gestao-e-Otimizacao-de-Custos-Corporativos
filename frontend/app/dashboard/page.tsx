@@ -4,13 +4,23 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, Doughnut, Line } from "react-chartjs-2";
 
-import { EmptyState, HeroSection, KpiCard, Notice, Panel, Pill } from "@/components/ui";
-import { getAnomalies, getCostOverview, getQuickWins, getWasteRanking, listCategories, listCostCenters, listProjects } from "@/lib/api";
+import { EmptyState, HeroSection, KpiCard, LoadingCards, Notice, Panel, Pill, SectionTabs } from "@/components/ui";
+import {
+  getAnomalies,
+  getBudgetVariance,
+  getCostOverview,
+  getQuickWins,
+  getWasteRanking,
+  listCategories,
+  listCostCenters,
+  listProjects
+} from "@/lib/api";
 import { ensureChartsRegistered } from "@/lib/chart";
 import { getDefaultDashboardDates, getPreviousPeriodRange, isDateWindowValid } from "@/lib/date";
 import { formatCompactPercent, formatCurrency, formatMonthLabel } from "@/lib/format";
 import {
   AnomalyDetectionResponse,
+  BudgetVarianceResponse,
   CostOverviewResponse,
   DimensionItem,
   QuickWinsResponse,
@@ -59,6 +69,7 @@ export default function DashboardPage() {
   const [overview, setOverview] = useState<CostOverviewResponse | null>(null);
   const [previousOverview, setPreviousOverview] = useState<CostOverviewResponse | null>(null);
   const [waste, setWaste] = useState<WasteRankingResponse | null>(null);
+  const [budgetVariance, setBudgetVariance] = useState<BudgetVarianceResponse | null>(null);
   const [anomalies, setAnomalies] = useState<AnomalyDetectionResponse | null>(null);
   const [quickWins, setQuickWins] = useState<QuickWinsResponse | null>(null);
   const [dimensionsLoading, setDimensionsLoading] = useState(true);
@@ -120,7 +131,7 @@ export default function DashboardPage() {
       });
 
       try {
-        const [overviewData, previousOverviewData, wasteData, anomalyData, quickWinData] = await Promise.all([
+        const [overviewData, previousOverviewData, wasteData, budgetData, anomalyData, quickWinData] = await Promise.all([
           getCostOverview({
             startDate: appliedFilters.startDate,
             endDate: appliedFilters.endDate,
@@ -136,6 +147,13 @@ export default function DashboardPage() {
             categoryIds: appliedFilters.categoryId ? [appliedFilters.categoryId] : undefined
           }),
           getWasteRanking({ endDate: appliedFilters.endDate, lookbackMonths: 3, topN: 10 }),
+          getBudgetVariance({
+            startDate: appliedFilters.startDate,
+            endDate: appliedFilters.endDate,
+            costCenterIds: appliedFilters.centerId ? [appliedFilters.centerId] : undefined,
+            includeOnTrack: false,
+            topN: 8
+          }),
           getAnomalies({ endDate: appliedFilters.endDate, lookbackMonths: 12, thresholdZ: 2.0, topN: 8 }),
           getQuickWins({ endDate: appliedFilters.endDate, lookbackMonths: 6, topN: 8, minimumTotal: 7000, targetReductionPercent: 8 })
         ]);
@@ -143,6 +161,7 @@ export default function DashboardPage() {
         setOverview(overviewData);
         setPreviousOverview(previousOverviewData);
         setWaste(wasteData);
+        setBudgetVariance(budgetData);
         setAnomalies(anomalyData);
         setQuickWins(quickWinData);
       } catch (requestError) {
@@ -222,6 +241,13 @@ export default function DashboardPage() {
   const quickWinPotential = useMemo(() => {
     return (quickWins?.items ?? []).slice(0, 3).reduce((sum, item) => sum + item.estimated_savings, 0);
   }, [quickWins]);
+
+  const budgetDelta = useMemo(() => {
+    if (!budgetVariance || budgetVariance.total_planned <= 0) {
+      return 0;
+    }
+    return (budgetVariance.total_variance / budgetVariance.total_planned) * 100;
+  }, [budgetVariance]);
 
   const totalDelta = useMemo(() => {
     if (!overview || !previousOverview || previousOverview.total_cost <= 0) {
@@ -307,7 +333,18 @@ export default function DashboardPage() {
         }
       />
 
-      <section className="filters-grid" aria-label="Filtros do dashboard">
+      <SectionTabs
+        ariaLabel="Atalhos de seções do dashboard"
+        items={[
+          { href: "#filtros-dashboard", label: "Filtros" },
+          { href: "#indicadores-dashboard", label: "Indicadores" },
+          { href: "#insights-dashboard", label: "Insights" },
+          { href: "#orcamento-dashboard", label: "Orçamento" },
+          { href: "#anomalias-dashboard", label: "Anomalias" }
+        ]}
+      />
+
+      <section id="filtros-dashboard" className="filters-grid" aria-label="Filtros do dashboard">
         <div className="field">
           <label htmlFor="dashboard-start-date">Data inicial</label>
           <input
@@ -395,10 +432,11 @@ export default function DashboardPage() {
 
       {error && <Notice kind="error">{error}</Notice>}
       {loading && <Notice>Carregando indicadores financeiros...</Notice>}
+      {loading && <LoadingCards count={4} />}
 
       {!loading && overview && (
         <>
-          <section className="grid metrics-grid">
+          <section id="indicadores-dashboard" className="grid metrics-grid" aria-busy={loading}>
             <KpiCard
               label="Custo total"
               value={formatCurrency(overview.total_cost)}
@@ -424,6 +462,19 @@ export default function DashboardPage() {
               tone="positive"
             />
             <KpiCard
+              label="Desvio orçamentário"
+              value={formatCurrency(budgetVariance?.total_variance ?? 0)}
+              subtitle={
+                <>
+                  Diferença realizado vs orçado{" "}
+                  <Pill tone={budgetDelta <= 0 ? "positive" : "danger"}>{`${budgetDelta <= 0 ? "↓" : "↑"} ${formatCompactPercent(
+                    Math.abs(budgetDelta)
+                  )}`}</Pill>
+                </>
+              }
+              tone={budgetDelta <= 0 ? "positive" : "danger"}
+            />
+            <KpiCard
               label="Maior desperdício"
               value={formatCurrency(waste?.items[0]?.estimated_waste ?? 0)}
               subtitle="Comparação com período anterior"
@@ -431,7 +482,7 @@ export default function DashboardPage() {
             />
           </section>
 
-          <section className="grid panels-grid">
+          <section id="insights-dashboard" className="grid panels-grid">
             <Panel title="Tendência temporal" subtitle="Evolução mensal consolidada de custos no período filtrado.">
               <div className="chart-shell">{trendChart && <Line data={trendChart} />}</div>
             </Panel>
@@ -477,7 +528,47 @@ export default function DashboardPage() {
             </Panel>
           </section>
 
-          <section className="grid panels-grid">
+          <section id="orcamento-dashboard" className="grid panels-grid">
+            <Panel title="Orçado vs realizado" subtitle="Centros com maior desvio financeiro no período filtrado.">
+              {budgetVariance && budgetVariance.items.length > 0 ? (
+                <div className="table-shell" role="region" aria-label="Tabela de variação orçamentária">
+                  <table>
+                    <caption className="table-caption">Desvio entre custo realizado e orçamento planejado por centro.</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Centro</th>
+                        <th scope="col">Orçado</th>
+                        <th scope="col">Realizado</th>
+                        <th scope="col">Variação</th>
+                        <th scope="col">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {budgetVariance.items.map((item) => (
+                        <tr key={item.cost_center_id}>
+                          <td>{item.cost_center}</td>
+                          <td>{formatCurrency(item.planned_amount)}</td>
+                          <td>{formatCurrency(item.actual_amount)}</td>
+                          <td>{formatCurrency(item.variance_amount)}</td>
+                          <td>
+                            <span className={`badge ${item.status === "under_budget" ? "badge-positive" : "badge-danger"}`}>
+                              {item.status === "under_budget" ? "Abaixo" : "Acima"} ({formatCompactPercent(item.variance_percent)})
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState title="Sem desvios relevantes">
+                  Nenhum centro apresentou desvio relevante para os filtros aplicados.
+                </EmptyState>
+              )}
+            </Panel>
+          </section>
+
+          <section id="anomalias-dashboard" className="grid panels-grid">
             <Panel title="Anomalias de custo" subtitle="Eventos com z-score acima do limiar estatístico monitorado.">
               {anomalies && anomalies.items.length > 0 ? (
                 <div className="table-shell" role="region" aria-label="Tabela de anomalias de custo">

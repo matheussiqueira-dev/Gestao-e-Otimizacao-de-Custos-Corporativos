@@ -96,3 +96,59 @@ export function EmptyState({ title = "Sem dados suficientes", children, action }
 export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "positive" | "danger" }) {
   return <span className={`pill pill-${tone}`}>{children}</span>;
 }
+
+type SectionTab = {
+  href: string;
+  label: string;
+};
+
+type SectionTabsProps = {
+  items: SectionTab[];
+  ariaLabel?: string;
+};
+
+export function SectionTabs({ items, ariaLabel = "Navegação de seções" }: SectionTabsProps) {
+  return (
+    <nav className="section-tabs" aria-label={ariaLabel}>
+      {items.map((item) => (
+        <a key={item.href} href={item.href} className="section-tab-link">
+          {item.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+type FlowStep = {
+  title: string;
+  description: string;
+  status?: "done" | "current" | "upcoming";
+};
+
+export function FlowSteps({ steps, ariaLabel = "Etapas do fluxo" }: { steps: FlowStep[]; ariaLabel?: string }) {
+  return (
+    <ol className="flow-steps" aria-label={ariaLabel}>
+      {steps.map((step, index) => (
+        <li key={`${step.title}-${index}`} className={`flow-step status-${step.status ?? "upcoming"}`}>
+          <span className="flow-step-index" aria-hidden="true">
+            {index + 1}
+          </span>
+          <div>
+            <strong>{step.title}</strong>
+            <p>{step.description}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export function LoadingCards({ count = 4 }: { count?: number }) {
+  return (
+    <div className="loading-grid" role="status" aria-live="polite" aria-label="Carregando conteúdo">
+      {Array.from({ length: count }, (_, index) => (
+        <div key={index} className="loading-card" />
+      ))}
+    </div>
+  );
+}

@@ -3,13 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
 
-import { EmptyState, HeroSection, KpiCard, Notice, Panel, Pill } from "@/components/ui";
-import { listCategories, listCostCenters, runSimulation } from "@/lib/api";
+import { EmptyState, FlowSteps, HeroSection, KpiCard, Notice, Panel, Pill, SectionTabs } from "@/components/ui";
+import { compareSimulations, listCategories, listCostCenters, runSimulation } from "@/lib/api";
 import { ensureChartsRegistered } from "@/lib/chart";
 import { getCurrentMonthWindow, isDateWindowValid } from "@/lib/date";
 import { formatCompactPercent, formatCurrency } from "@/lib/format";
 import { deleteScenario, listSavedScenarios, SavedScenario, saveScenario } from "@/lib/scenario-storage";
-import { DimensionItem, SimulationCutCategory, SimulationCutCenter, SimulationResponse } from "@/lib/types";
+import {
+  DimensionItem,
+  SimulationComparisonResponse,
+  SimulationCutCategory,
+  SimulationCutCenter,
+  SimulationResponse
+} from "@/lib/types";
 
 ensureChartsRegistered();
 
@@ -157,11 +163,16 @@ export default function SimulacoesPage() {
   const [scenarioName, setScenarioName] = useState("");
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
   const [scenarioFeedback, setScenarioFeedback] = useState<string | null>(null);
+  const [selectedScenarioIds, setSelectedScenarioIds] = useState<string[]>([]);
+  const [includeCurrentScenario, setIncludeCurrentScenario] = useState(true);
 
   const [result, setResult] = useState<SimulationResponse | null>(null);
+  const [comparisonResult, setComparisonResult] = useState<SimulationComparisonResponse | null>(null);
   const [dimensionsLoading, setDimensionsLoading] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
 
   const hasCuts = centerCuts.length > 0 || categoryCuts.length > 0;
 
@@ -193,6 +204,10 @@ export default function SimulacoesPage() {
     const timer = setTimeout(() => setScenarioFeedback(null), 2800);
     return () => clearTimeout(timer);
   }, [scenarioFeedback]);
+
+  useEffect(() => {
+    setSelectedScenarioIds((current) => current.filter((id) => savedScenarios.some((scenario) => scenario.id === id)));
+  }, [savedScenarios]);
 
   const addCenterCut = () => {
     if (!draftCenterId || centerCuts.some((item) => item.cost_center_id === draftCenterId)) {
@@ -275,6 +290,10 @@ export default function SimulacoesPage() {
     setScenarioFeedback("Cenário removido.");
   };
 
+  const toggleScenarioSelection = (id: string) => {
+    setSelectedScenarioIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  };
+
   const executeSimulation = async () => {
     if (!isDateWindowValid({ startDate, endDate })) {
       setError("A data inicial precisa ser menor ou igual à data final.");
@@ -300,6 +319,50 @@ export default function SimulacoesPage() {
       setError(requestError instanceof Error ? requestError.message : "Falha ao executar simulação.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const executeComparison = async () => {
+    const selectedSavedScenarios = savedScenarios.filter((scenario) => selectedScenarioIds.includes(scenario.id));
+    const scenarios = selectedSavedScenarios.map((scenario) => ({
+      scenario_name: scenario.name,
+      center_cuts: scenario.centerCuts,
+      category_cuts: scenario.categoryCuts
+    }));
+
+    if (includeCurrentScenario && hasCuts) {
+      const baseName = scenarioName.trim() || "Cenário atual";
+      const hasNameCollision = scenarios.some((scenario) => scenario.scenario_name.trim().toLowerCase() === baseName.toLowerCase());
+      scenarios.unshift({
+        scenario_name: hasNameCollision ? `${baseName} (Atual)` : baseName,
+        center_cuts: centerCuts,
+        category_cuts: categoryCuts
+      });
+    }
+
+    if (scenarios.length < 2) {
+      setComparisonError("Selecione pelo menos dois cenários para comparar.");
+      return;
+    }
+
+    if (!isDateWindowValid({ startDate, endDate })) {
+      setComparisonError("A data inicial precisa ser menor ou igual à data final.");
+      return;
+    }
+
+    setComparisonLoading(true);
+    setComparisonError(null);
+    try {
+      const response = await compareSimulations({
+        startDate,
+        endDate,
+        scenarios
+      });
+      setComparisonResult(response);
+    } catch (requestError) {
+      setComparisonError(requestError instanceof Error ? requestError.message : "Falha ao comparar cenários.");
+    } finally {
+      setComparisonLoading(false);
     }
   };
 
@@ -354,6 +417,32 @@ export default function SimulacoesPage() {
     };
   }, [result]);
 
+  const flowSteps = useMemo<Array<{ title: string; description: string; status: "done" | "current" | "upcoming" }>>(
+    () => [
+      {
+        title: "Configurar cortes",
+        description: "Defina escopo, datas e alavancas de redução.",
+        status: hasCuts ? "done" : "current"
+      },
+      {
+        title: "Executar simulação",
+        description: "Calcule impacto e baseline do cenário.",
+        status: result ? "done" : hasCuts ? "current" : "upcoming"
+      },
+      {
+        title: "Comparar cenários",
+        description: "Selecione opções e ranqueie estratégias.",
+        status: comparisonResult ? "done" : selectedScenarioIds.length > 0 ? "current" : "upcoming"
+      },
+      {
+        title: "Publicar plano",
+        description: "Exporte evidências e priorize execução.",
+        status: result ? "current" : "upcoming"
+      }
+    ],
+    [comparisonResult, hasCuts, result, selectedScenarioIds.length]
+  );
+
   return (
     <>
       <HeroSection
@@ -394,7 +483,20 @@ export default function SimulacoesPage() {
         }
       />
 
-      <section className="filters-grid" aria-label="Parâmetros de simulação">
+      <FlowSteps steps={flowSteps} ariaLabel="Fluxo de construção e análise de cenários" />
+
+      <SectionTabs
+        ariaLabel="Atalhos de seções de simulação"
+        items={[
+          { href: "#parametros-simulacao", label: "Parâmetros" },
+          { href: "#cortes-simulacao", label: "Cortes" },
+          { href: "#biblioteca-simulacao", label: "Biblioteca" },
+          { href: "#comparacao-simulacao", label: "Comparação" },
+          { href: "#resultado-simulacao", label: "Resultado" }
+        ]}
+      />
+
+      <section id="parametros-simulacao" className="filters-grid" aria-label="Parâmetros de simulação">
         <div className="field">
           <label htmlFor="simulation-start-date">Data inicial</label>
           <input id="simulation-start-date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
@@ -466,7 +568,7 @@ export default function SimulacoesPage() {
         </div>
       </section>
 
-      <section className="grid panels-grid">
+      <section id="cortes-simulacao" className="grid panels-grid">
         <Panel title="Cortes por centro de custo" subtitle="Ajustes direcionados para estruturas organizacionais específicas.">
           <CenterCutEditor centers={centers} cuts={centerCuts} onChange={setCenterCuts} />
         </Panel>
@@ -476,7 +578,7 @@ export default function SimulacoesPage() {
         </Panel>
       </section>
 
-      <section className="grid panels-grid">
+      <section id="biblioteca-simulacao" className="grid panels-grid">
         <Panel title="Biblioteca de cenários salvos" subtitle="Reaproveite estratégias anteriores e acelere ciclos de decisão.">
           {savedScenarios.length === 0 ? (
             <EmptyState title="Nenhum cenário salvo">
@@ -497,6 +599,9 @@ export default function SimulacoesPage() {
                     </div>
                   </div>
                   <div className="inline-actions">
+                    <button className="button" type="button" onClick={() => toggleScenarioSelection(scenario.id)}>
+                      {selectedScenarioIds.includes(scenario.id) ? "Remover da comparação" : "Selecionar p/ comparação"}
+                    </button>
                     <button className="button" type="button" onClick={() => applySavedScenario(scenario)}>
                       Carregar
                     </button>
@@ -507,6 +612,62 @@ export default function SimulacoesPage() {
                 </article>
               ))}
             </div>
+          )}
+        </Panel>
+      </section>
+
+      <section id="comparacao-simulacao" className="grid panels-grid">
+        <Panel title="Comparação de cenários" subtitle="Compare estratégias para escolher o plano com maior retorno.">
+          <div className="inline-actions">
+            <label className="checkbox-line" htmlFor="include-current-scenario">
+              <input
+                id="include-current-scenario"
+                type="checkbox"
+                checked={includeCurrentScenario}
+                onChange={(event) => setIncludeCurrentScenario(event.target.checked)}
+              />
+              Incluir cenário atual
+            </label>
+            <button className="button button-primary" type="button" onClick={executeComparison} disabled={comparisonLoading}>
+              {comparisonLoading ? "Comparando..." : "Comparar cenários"}
+            </button>
+          </div>
+          {comparisonError && <Notice kind="error">{comparisonError}</Notice>}
+          {comparisonResult ? (
+            <div className="table-shell" role="region" aria-label="Tabela comparativa de cenários">
+              <table>
+                <caption className="table-caption">Ranking de cenários por economia estimada.</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Ranking</th>
+                    <th scope="col">Cenário</th>
+                    <th scope="col">Baseline</th>
+                    <th scope="col">Projetado</th>
+                    <th scope="col">Economia</th>
+                    <th scope="col">Impacto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparisonResult.items.map((item) => (
+                    <tr key={item.scenario_name}>
+                      <td>{item.rank}</td>
+                      <td>
+                        {item.scenario_name}{" "}
+                        {comparisonResult.best_scenario === item.scenario_name ? <Pill tone="positive">Melhor cenário</Pill> : null}
+                      </td>
+                      <td>{formatCurrency(item.baseline_total)}</td>
+                      <td>{formatCurrency(item.projected_total)}</td>
+                      <td>{formatCurrency(item.estimated_savings)}</td>
+                      <td>{formatCompactPercent(item.impact_percent)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="Sem comparação executada">
+              Selecione cenários salvos e execute a comparação para obter o ranking de impacto.
+            </EmptyState>
           )}
         </Panel>
       </section>
@@ -527,7 +688,7 @@ export default function SimulacoesPage() {
 
       {result && (
         <>
-          <section className="grid metrics-grid">
+          <section id="resultado-simulacao" className="grid metrics-grid">
             <KpiCard label="Baseline" value={formatCurrency(result.baseline_total)} subtitle="Custo total de referência" />
             <KpiCard label="Projetado" value={formatCurrency(result.projected_total)} subtitle="Após aplicação dos cortes" />
             <KpiCard label="Economia estimada" value={formatCurrency(result.estimated_savings)} tone="positive" />

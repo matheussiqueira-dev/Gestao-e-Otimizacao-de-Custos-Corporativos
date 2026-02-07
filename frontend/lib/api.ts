@@ -1,8 +1,11 @@
 import {
   AnomalyDetectionResponse,
+  BudgetVarianceResponse,
   CostOverviewResponse,
   DimensionItem,
   QuickWinsResponse,
+  SimulationComparisonResponse,
+  SimulationComparisonScenario,
   SimulationCutCategory,
   SimulationCutCenter,
   SimulationResponse,
@@ -138,4 +141,38 @@ export async function runSimulation(payload: {
       category_cuts: payload.categoryCuts
     })
   });
+}
+
+export async function compareSimulations(payload: {
+  startDate: string;
+  endDate: string;
+  scenarios: SimulationComparisonScenario[];
+}) {
+  return fetchJSON<SimulationComparisonResponse>("/api/v1/simulations/compare", {
+    method: "POST",
+    body: JSON.stringify({
+      start_date: payload.startDate,
+      end_date: payload.endDate,
+      scenarios: payload.scenarios
+    })
+  });
+}
+
+export async function getBudgetVariance(params: {
+  startDate: string;
+  endDate: string;
+  costCenterIds?: number[];
+  tolerancePercent?: number;
+  includeOnTrack?: boolean;
+  topN?: number;
+}) {
+  const url = new URL("/api/v1/budgets/variance", API_BASE_URL);
+  const includeOnTrack = params.includeOnTrack ?? true;
+  appendParam(url, "start_date", params.startDate);
+  appendParam(url, "end_date", params.endDate);
+  appendParam(url, "cost_center_ids", params.costCenterIds);
+  appendParam(url, "tolerance_percent", params.tolerancePercent ?? 3);
+  appendParam(url, "include_on_track", includeOnTrack ? "true" : "false");
+  appendParam(url, "top_n", params.topN);
+  return fetchJSON<BudgetVarianceResponse>(url.pathname + url.search);
 }

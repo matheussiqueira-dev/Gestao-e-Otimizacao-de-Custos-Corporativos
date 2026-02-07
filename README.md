@@ -1,134 +1,108 @@
-# Cost Intelligence Platform - Backend
+# Cost Intelligence Platform
 
-Backend da plataforma de gestão e otimização de custos corporativos, construído para cenários reais de governança financeira com foco em robustez, segurança e escalabilidade.
+Plataforma fullstack para gestão e otimização de custos corporativos, com foco em decisões financeiras orientadas por dados para CFOs, controllers e lideranças de operações.
 
-## Visão geral do backend
+## Visão geral do projeto
 
-O backend expõe APIs para:
+O sistema integra quatro pilares:
 
-- Consolidação de custos por período, centro, projeto e categoria.
-- Simulações de redução com impacto financeiro estimado.
-- Detecção de desperdícios, anomalias e oportunidades (quick wins).
-- Governança orçamentária com análise de variação entre orçado e realizado.
-- Comparação de múltiplos cenários de simulação para priorização executiva.
+1. Diagnóstico financeiro: consolidação e análise de custos por centro, projeto, categoria e período.
+2. Simulação estratégica: cenários de redução com ranking de impacto e comparação entre estratégias.
+3. Governança orçamentária: monitoramento de variação entre orçado e realizado.
+4. Inteligência analítica: detecção de desperdícios, anomalias e oportunidades (quick wins).
 
-## Domínio e regras principais
+## Arquitetura e decisões técnicas
 
-- O custo é registrado por `CostEntry` (centro de custo, projeto, categoria, data de referência e valor).
-- Simulações aceitam cortes percentuais e absolutos por centro/categoria.
-- Simulações exigem pelo menos um corte válido e não aceitam entidades duplicadas.
-- Analytics compara períodos equivalentes e classifica maior desperdício por variação positiva.
-- Orçamento (`BudgetEntry`) é consolidado por mês e comparado com realizado para alertas de desvio.
+A solução adota monorepo com monólito modular em camadas no backend e frontend desacoplado por contrato HTTP.
 
-## Arquitetura adotada
+### Backend (FastAPI)
 
-Arquitetura modular em camadas (monólito modular):
+Arquitetura em camadas:
 
-1. `API` (FastAPI): rotas, contratos HTTP e autorização.
-2. `Services`: regras de negócio e orquestração de casos de uso.
-3. `Repository` (SQLAlchemy): acesso ao banco e consultas agregadas.
-4. `Core`: configuração, observabilidade, cache, segurança e middlewares.
+- `API`: roteamento, contratos e autorização por escopo.
+- `Services`: regras de negócio por domínio (`cost`, `simulation`, `analytics`, `budget`).
+- `Repository`: consultas SQL agregadas via SQLAlchemy.
+- `Core`: configuração, cache, segurança, observabilidade e middlewares.
 
-## Tecnologias utilizadas
+Principais decisões:
 
-- Python 3.12+
+- Separação de serviços por responsabilidade (SOLID/DRY).
+- API key com escopos (`costs:read`, `analytics:read`, `budgets:read`, `simulations:write`).
+- Rate limiting por IP e hardening de headers HTTP.
+- Cache Redis com chaves estáveis hashadas (SHA-256).
+- Inicialização lazy da engine SQL para reduzir acoplamento de import e facilitar testes.
+
+### Frontend (Next.js)
+
+Arquitetura baseada em App Router com design system customizado:
+
+- UI orientada a decisão executiva.
+- Tokens visuais e componentes reutilizáveis.
+- Fluxos avançados de dashboard e simulação.
+- Integração direta com APIs versionadas do backend.
+
+Principais decisões:
+
+- Refactor completo de UI/UX com foco em hierarquia visual e acessibilidade.
+- Filtros aplicáveis e compartilháveis por URL.
+- Simulações com biblioteca de cenários no `localStorage`.
+- Integração de features analíticas e orçamentárias no dashboard.
+
+## Stack e tecnologias
+
+### Frontend
+
+- Next.js 14
+- React 18
+- TypeScript
+- Chart.js + react-chartjs-2
+
+### Backend
+
 - FastAPI
 - SQLAlchemy 2
+- Pydantic v2
 - PostgreSQL
 - Redis
-- Pydantic v2
-- Uvicorn
 - Pytest
+
+### Infra
+
+- Docker Compose
+- Superset (opcional via profile `bi`)
 
 ## Estrutura do projeto
 
 ```text
-backend
-├── app
-│   ├── api
-│   │   ├── dependencies.py
-│   │   ├── router.py
-│   │   └── v1
-│   │       ├── routes_analytics.py
-│   │       ├── routes_budgets.py
-│   │       ├── routes_costs.py
-│   │       └── routes_simulations.py
-│   ├── core
-│   │   ├── cache.py
-│   │   ├── config.py
-│   │   ├── exceptions.py
-│   │   ├── observability.py
-│   │   └── security.py
-│   ├── db
-│   │   ├── init_db.py
-│   │   └── session.py
-│   ├── models
-│   ├── repositories
-│   │   └── cost_repository.py
-│   ├── schemas
-│   │   ├── analytics.py
-│   │   ├── budgets.py
-│   │   ├── costs.py
-│   │   ├── opportunities.py
-│   │   └── simulations.py
-│   ├── services
-│   │   ├── analytics_service.py
-│   │   ├── budget_service.py
-│   │   ├── cost_service.py
-│   │   └── simulation_service.py
-│   └── main.py
-└── tests
-    ├── test_analytics_service.py
-    ├── test_budget_service.py
-    ├── test_security.py
-    └── test_simulation_service.py
+.
+├── backend
+│   ├── app
+│   │   ├── api
+│   │   ├── core
+│   │   ├── db
+│   │   ├── models
+│   │   ├── repositories
+│   │   ├── schemas
+│   │   └── services
+│   ├── tests
+│   └── requirements*.txt
+├── frontend
+│   ├── app
+│   ├── components
+│   ├── lib
+│   └── package*.json
+├── db
+│   ├── schema.sql
+│   ├── bi_views.sql
+│   └── seeds/seed_data.sql
+├── bi/superset
+├── infra
+└── docker-compose.yml
 ```
 
-## Segurança e confiabilidade
+## APIs principais
 
-### Autenticação e autorização
-
-- API Key opcional por ambiente (`AUTH_ENABLED`).
-- Autorização por escopo (`require_scope`) por endpoint.
-- Comparação de chave com `secrets.compare_digest` (mitiga timing attack).
-- Suporte a múltiplas chaves e escopos via `API_KEYS_JSON`.
-
-Escopos usados:
-
-- `costs:read`
-- `analytics:read`
-- `budgets:read`
-- `simulations:write`
-
-### Proteções e hardening
-
-- `TrustedHostMiddleware` para host allowlist.
-- Rate limiting por IP (`RateLimitMiddleware`).
-- Security headers:
-  - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: DENY`
-  - `Referrer-Policy`
-  - `Permissions-Policy`
-  - `Content-Security-Policy`
-- Tratamento global de exceções com `request_id` para rastreabilidade.
-
-### Observabilidade
-
-- Request ID propagado em logs e resposta (`X-Request-ID`).
-- Logging contextual por request.
-- Alertas de latência alta por request no middleware.
-
-## Performance e escalabilidade
-
-- Pool de conexões SQL configurável (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE_SECONDS`).
-- Cache Redis com chaves estáveis hashadas (SHA-256).
-- `get_or_set_json` para evitar repetição de lógica de cache.
-- GZip middleware para redução de payload.
-- Filtros defensivos com limite de cardinalidade para evitar consultas abusivas.
-
-## API (v1)
-
-Base path: `/api/v1`
+Base: `http://localhost:8000/api/v1`
 
 ### Custos
 
@@ -147,48 +121,68 @@ Base path: `/api/v1`
 ### Simulações
 
 - `POST /simulations/run`
-- `POST /simulations/compare` (nova feature)
+- `POST /simulations/compare`
 
 ### Orçamento
 
-- `GET /budgets/variance` (nova feature)
+- `GET /budgets/variance`
+
+## Features implementadas (impacto funcional)
+
+1. Comparação de cenários de simulação:
+- Seleção de múltiplos cenários e ranking automático do melhor plano.
+- Reduz tempo de decisão entre alternativas de redução.
+
+2. Governança orçamentária no dashboard:
+- KPI e tabela de variação orçado vs realizado por centro.
+- Aumenta capacidade de intervenção preventiva em desvios.
+
+3. Segurança e confiabilidade backend:
+- Escopo por endpoint, tratamento de erro padronizado, rate limiting e headers de proteção.
+- Melhora postura para produção e rastreabilidade operacional.
+
+4. Performance e escalabilidade:
+- Cache padronizado com `get_or_set`, pool de conexão configurável e gzip.
+- Menor latência e melhor throughput em rotas analíticas.
 
 ## Setup e execução
 
-### Variáveis de ambiente (`backend/.env`)
+### Pré-requisitos
 
-```env
-APP_NAME=Cost Intelligence Platform
-APP_VERSION=1.2.0
-API_V1_PREFIX=/api/v1
-DEBUG=true
-ENVIRONMENT=development
+- Docker e Docker Compose
+- Node.js 20+
+- Python 3.12+
+- PostgreSQL e Redis (para execução manual)
 
-DATABASE_URL=postgresql+psycopg://cost_user:cost_pass@localhost:5432/costintel
-DB_POOL_SIZE=10
-DB_MAX_OVERFLOW=20
-DB_POOL_RECYCLE_SECONDS=1800
+### Opção A: Docker Compose (recomendado)
 
-REDIS_URL=redis://localhost:6379/0
-CACHE_ENABLED=true
-CACHE_TTL_SECONDS=300
-
-ALLOWED_ORIGINS=http://localhost:3000
-ALLOWED_HOSTS=*
-
-AUTH_ENABLED=false
-API_KEY_HEADER_NAME=X-API-Key
-API_KEY_VALUE=costintel-dev-key
-API_KEYS_JSON={"costintel-dev-key": ["*"]}
-
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REQUESTS=120
-RATE_LIMIT_WINDOW_SECONDS=60
-
-LOG_LEVEL=INFO
+```bash
+docker compose up --build -d
 ```
 
-### Execução local
+Com BI/Superset:
+
+```bash
+docker compose --profile bi up --build -d
+```
+
+Serviços:
+
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8000`
+- Superset: `http://localhost:8088` (profile `bi`)
+
+### Opção B: execução manual
+
+### Banco e dados
+
+```bash
+psql -h localhost -U cost_user -d costintel -f db/schema.sql
+psql -h localhost -U cost_user -d costintel -f db/seeds/seed_data.sql
+psql -h localhost -U cost_user -d costintel -f db/bi_views.sql
+```
+
+### Backend
 
 ```bash
 cd backend
@@ -196,42 +190,85 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Inicialização do banco
+### Frontend
 
 ```bash
-python -m app.db.init_db
+cd frontend
+npm install
+npm run dev
 ```
 
-ou via SQL do monorepo:
+## Variáveis de ambiente
 
-```bash
-psql -h localhost -U cost_user -d costintel -f db/schema.sql
-psql -h localhost -U cost_user -d costintel -f db/seeds/seed_data.sql
+### Backend (`backend/.env`)
+
+```env
+APP_NAME=Cost Intelligence Platform
+APP_VERSION=1.2.0
+API_V1_PREFIX=/api/v1
+DEBUG=true
+ENVIRONMENT=development
+DATABASE_URL=postgresql+psycopg://cost_user:cost_pass@localhost:5432/costintel
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+DB_POOL_RECYCLE_SECONDS=1800
+REDIS_URL=redis://localhost:6379/0
+CACHE_ENABLED=true
+CACHE_TTL_SECONDS=300
+ALLOWED_ORIGINS=http://localhost:3000
+ALLOWED_HOSTS=*
+AUTH_ENABLED=false
+API_KEY_HEADER_NAME=X-API-Key
+API_KEY_VALUE=costintel-dev-key
+API_KEYS_JSON={"costintel-dev-key":["*"]}
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=120
+RATE_LIMIT_WINDOW_SECONDS=60
+LOG_LEVEL=INFO
 ```
 
-### Testes
+### Frontend (`frontend/.env.local`)
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_SUPERSET_EMBED_URL=http://localhost:8088/superset/dashboard/1/?standalone=1
+NEXT_PUBLIC_API_KEY=costintel-dev-key
+```
+
+## Testes e qualidade
+
+### Backend
 
 ```bash
 cd backend
 python -m pytest
 ```
 
-## Boas práticas e padrões aplicados
+### Frontend
 
-- Separação clara por camada (API, serviços, repositório, core).
-- Contratos tipados com Pydantic e validações de domínio.
-- DRY em cache, composição de query SQL e validação de filtros.
-- Tratamento de erro consistente com payload padronizado.
-- Princípio de menor privilégio por escopo de rota.
-- Testes unitários para regras críticas de simulação, analytics, orçamento e segurança.
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+## Boas práticas adotadas
+
+- Clean architecture por camadas no backend.
+- SOLID e DRY com separação clara de responsabilidades.
+- Contratos de API tipados e validação de domínio.
+- Design system consistente com foco em acessibilidade.
+- Documentação de decisões UX/UI em `frontend/UX_UI_DECISIONS.md`.
+- Observabilidade com request id e logging contextual.
+- Segurança incremental para cenários reais de produção.
 
 ## Melhorias futuras
 
-- Persistência de cenários de simulação (versionamento e auditoria).
+- E2E frontend com Playwright e testes de contrato automatizados entre frontend/backend.
 - RBAC completo com identidade de usuário (JWT/OAuth2).
-- Métricas Prometheus e dashboards operacionais (SLO/SLI).
-- Workers assíncronos para cálculos analíticos pesados.
-- Alembic para versionamento de schema e migrações automatizadas.
+- Métricas Prometheus + dashboard de SLI/SLO.
+- Pipeline de migração de schema com Alembic.
+- Processamento assíncrono para analytics pesados.
 
 Autoria: Matheus Siqueira  
 Website: https://www.matheussiqueira.dev/
