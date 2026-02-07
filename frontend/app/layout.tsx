@@ -18,14 +18,31 @@ const serif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: "Cost Intelligence Platform",
+  metadataBase: new URL("https://cost-intelligence.local"),
+  title: {
+    default: "Cost Intelligence Platform",
+    template: "%s | Cost Intelligence Platform"
+  },
   description: "Plataforma para gestão, simulação e otimização de custos corporativos.",
   keywords: ["gestão de custos", "otimização financeira", "cfo", "simulação de custos", "business intelligence"],
+  robots: {
+    index: true,
+    follow: true
+  },
+  alternates: {
+    canonical: "/"
+  },
   openGraph: {
     title: "Cost Intelligence Platform",
     description: "Plataforma para gestão, simulação e otimização de custos corporativos.",
     type: "website",
-    locale: "pt_BR"
+    locale: "pt_BR",
+    siteName: "Cost Intelligence Platform"
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Cost Intelligence Platform",
+    description: "Gestão e otimização de custos corporativos com inteligência analítica."
   }
 };
 
@@ -38,8 +55,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </a>
         <div className="app-backdrop" />
         <header className="topbar">
-          <div className="topbar-brand">
-            <p className="brand-kicker">Cost Intelligence Platform</p>
+          <div className="topbar-brand" role="presentation">
+            <p className="brand-kicker">Cost Command Center</p>
             <p className="brand-subtitle">Gestão orientada por impacto financeiro</p>
           </div>
           <TopNavigation />

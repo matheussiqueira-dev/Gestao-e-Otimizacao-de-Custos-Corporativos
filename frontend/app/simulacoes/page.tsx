@@ -1,29 +1,146 @@
 "use client";
 
-import { BarElement, CategoryScale, Chart as ChartJS, Legend, LinearScale, Tooltip } from "chart.js";
 import { useEffect, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
 
-import { EmptyState, HeroSection, KpiCard, Notice, Panel } from "@/components/ui";
+import { EmptyState, HeroSection, KpiCard, Notice, Panel, Pill } from "@/components/ui";
 import { listCategories, listCostCenters, runSimulation } from "@/lib/api";
+import { ensureChartsRegistered } from "@/lib/chart";
+import { getCurrentMonthWindow, isDateWindowValid } from "@/lib/date";
+import { formatCompactPercent, formatCurrency } from "@/lib/format";
+import { deleteScenario, listSavedScenarios, SavedScenario, saveScenario } from "@/lib/scenario-storage";
 import { DimensionItem, SimulationCutCategory, SimulationCutCenter, SimulationResponse } from "@/lib/types";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+ensureChartsRegistered();
 
-const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+type CenterCutEditorProps = {
+  centers: DimensionItem[];
+  cuts: SimulationCutCenter[];
+  onChange: (next: SimulationCutCenter[]) => void;
+};
 
-function toInputDate(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+type CategoryCutEditorProps = {
+  categories: DimensionItem[];
+  cuts: SimulationCutCategory[];
+  onChange: (next: SimulationCutCategory[]) => void;
+};
+
+function CenterCutEditor({ centers, cuts, onChange }: CenterCutEditorProps) {
+  return cuts.length === 0 ? (
+    <EmptyState title="Nenhum centro configurado">Adicione pelo menos um centro para simular impacto.</EmptyState>
+  ) : (
+    <div className="cut-list">
+      {cuts.map((cut, index) => {
+        const centerName = centers.find((center) => center.id === cut.cost_center_id)?.name ?? "Centro";
+
+        return (
+          <article className="cut-item" key={cut.cost_center_id}>
+            <div className="cut-item-head">
+              <strong>{centerName}</strong>
+              <button
+                className="button"
+                type="button"
+                onClick={() => onChange(cuts.filter((item) => item.cost_center_id !== cut.cost_center_id))}
+              >
+                Remover
+              </button>
+            </div>
+
+            <div className="field">
+              <label htmlFor={`center-percent-${cut.cost_center_id}`}>Corte percentual</label>
+              <div className="range-shell">
+                <input
+                  id={`center-percent-${cut.cost_center_id}`}
+                  type="range"
+                  min={0}
+                  max={60}
+                  step={1}
+                  value={cut.percent_cut}
+                  onChange={(event) =>
+                    onChange(cuts.map((item, itemIndex) => (itemIndex === index ? { ...item, percent_cut: Number(event.target.value) } : item)))
+                  }
+                />
+                <output>{formatCompactPercent(cut.percent_cut)}</output>
+              </div>
+            </div>
+
+            <div className="field">
+              <label htmlFor={`center-absolute-${cut.cost_center_id}`}>Corte absoluto (R$)</label>
+              <input
+                id={`center-absolute-${cut.cost_center_id}`}
+                type="number"
+                min={0}
+                step={500}
+                value={cut.absolute_cut}
+                onChange={(event) =>
+                  onChange(cuts.map((item, itemIndex) => (itemIndex === index ? { ...item, absolute_cut: Number(event.target.value) } : item)))
+                }
+              />
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
-function getCurrentMonthWindow() {
-  const now = new Date();
-  const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return { startDate: toInputDate(startDate), endDate: toInputDate(endDate) };
+function CategoryCutEditor({ categories, cuts, onChange }: CategoryCutEditorProps) {
+  return cuts.length === 0 ? (
+    <EmptyState title="Nenhuma categoria configurada">Adicione categorias para avaliar frentes de economia.</EmptyState>
+  ) : (
+    <div className="cut-list">
+      {cuts.map((cut, index) => {
+        const categoryName = categories.find((category) => category.id === cut.category_id)?.name ?? "Categoria";
+
+        return (
+          <article className="cut-item" key={cut.category_id}>
+            <div className="cut-item-head">
+              <strong>{categoryName}</strong>
+              <button
+                className="button"
+                type="button"
+                onClick={() => onChange(cuts.filter((item) => item.category_id !== cut.category_id))}
+              >
+                Remover
+              </button>
+            </div>
+
+            <div className="field">
+              <label htmlFor={`category-percent-${cut.category_id}`}>Redução percentual</label>
+              <div className="range-shell">
+                <input
+                  id={`category-percent-${cut.category_id}`}
+                  type="range"
+                  min={0}
+                  max={60}
+                  step={1}
+                  value={cut.percent_cut}
+                  onChange={(event) =>
+                    onChange(cuts.map((item, itemIndex) => (itemIndex === index ? { ...item, percent_cut: Number(event.target.value) } : item)))
+                  }
+                />
+                <output>{formatCompactPercent(cut.percent_cut)}</output>
+              </div>
+            </div>
+
+            <div className="field">
+              <label htmlFor={`category-absolute-${cut.category_id}`}>Redução absoluta (R$)</label>
+              <input
+                id={`category-absolute-${cut.category_id}`}
+                type="number"
+                min={0}
+                step={500}
+                value={cut.absolute_cut}
+                onChange={(event) =>
+                  onChange(cuts.map((item, itemIndex) => (itemIndex === index ? { ...item, absolute_cut: Number(event.target.value) } : item)))
+                }
+              />
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function SimulacoesPage() {
@@ -37,8 +154,12 @@ export default function SimulacoesPage() {
   const [categoryCuts, setCategoryCuts] = useState<SimulationCutCategory[]>([]);
   const [draftCenterId, setDraftCenterId] = useState<number | "">("");
   const [draftCategoryId, setDraftCategoryId] = useState<number | "">("");
+  const [scenarioName, setScenarioName] = useState("");
+  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
+  const [scenarioFeedback, setScenarioFeedback] = useState<string | null>(null);
 
   const [result, setResult] = useState<SimulationResponse | null>(null);
+  const [dimensionsLoading, setDimensionsLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,10 +176,23 @@ export default function SimulacoesPage() {
       if (loadedCategories.length > 0) {
         setDraftCategoryId(loadedCategories[0].id);
       }
+      setDimensionsLoading(false);
     };
 
-    loadDimensions().catch(() => setError("Falha ao carregar dimensões para simulação."));
+    loadDimensions().catch(() => {
+      setDimensionsLoading(false);
+      setError("Falha ao carregar dimensões para simulação.");
+    });
+    setSavedScenarios(listSavedScenarios());
   }, []);
+
+  useEffect(() => {
+    if (!scenarioFeedback) {
+      return;
+    }
+    const timer = setTimeout(() => setScenarioFeedback(null), 2800);
+    return () => clearTimeout(timer);
+  }, [scenarioFeedback]);
 
   const addCenterCut = () => {
     if (!draftCenterId || centerCuts.some((item) => item.cost_center_id === draftCenterId)) {
@@ -105,7 +239,53 @@ export default function SimulacoesPage() {
     );
   };
 
+  const applySavedScenario = (scenario: SavedScenario) => {
+    setScenarioName(scenario.name);
+    setStartDate(scenario.startDate);
+    setEndDate(scenario.endDate);
+    setCenterCuts(scenario.centerCuts);
+    setCategoryCuts(scenario.categoryCuts);
+    setScenarioFeedback(`Cenário "${scenario.name}" carregado.`);
+  };
+
+  const persistScenario = () => {
+    const normalizedName = scenarioName.trim();
+    if (!normalizedName) {
+      setScenarioFeedback("Defina um nome para salvar o cenário.");
+      return;
+    }
+    if (!hasCuts) {
+      setScenarioFeedback("Adicione ao menos um corte antes de salvar.");
+      return;
+    }
+
+    const next = saveScenario({
+      name: normalizedName,
+      startDate,
+      endDate,
+      centerCuts,
+      categoryCuts
+    });
+    setSavedScenarios(next);
+    setScenarioFeedback(`Cenário "${normalizedName}" salvo.`);
+  };
+
+  const removeScenario = (id: string) => {
+    setSavedScenarios(deleteScenario(id));
+    setScenarioFeedback("Cenário removido.");
+  };
+
   const executeSimulation = async () => {
+    if (!isDateWindowValid({ startDate, endDate })) {
+      setError("A data inicial precisa ser menor ou igual à data final.");
+      return;
+    }
+
+    if (!hasCuts) {
+      setError("Adicione pelo menos um corte para executar a simulação.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
@@ -123,6 +303,40 @@ export default function SimulacoesPage() {
     }
   };
 
+  const exportCsv = () => {
+    if (!result) {
+      return;
+    }
+
+    const header = ["Tipo", "Entidade", "Baseline", "Projetado", "Economia", "Impacto%"];
+    const centerRows = result.center_impact_ranking.map((item) => [
+      "Centro",
+      item.entity_name,
+      item.baseline_amount,
+      item.projected_amount,
+      item.estimated_savings,
+      item.impact_percent
+    ]);
+    const categoryRows = result.category_impact_ranking.map((item) => [
+      "Categoria",
+      item.entity_name,
+      item.baseline_amount,
+      item.projected_amount,
+      item.estimated_savings,
+      item.impact_percent
+    ]);
+
+    const rows = [header, ...centerRows, ...categoryRows];
+    const csv = rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(";")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "simulacao-custos.csv";
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   const centerImpactChart = useMemo(() => {
     if (!result) {
       return null;
@@ -134,7 +348,7 @@ export default function SimulacoesPage() {
         {
           label: "Economia estimada por centro",
           data: result.center_impact_ranking.map((item) => item.estimated_savings),
-          backgroundColor: "#0f7b8f"
+          backgroundColor: "#0f4c81"
         }
       ]
     };
@@ -144,8 +358,8 @@ export default function SimulacoesPage() {
     <>
       <HeroSection
         eyebrow="Simulação estratégica"
-        title="Modele cenários de redução e priorize ações com maior economia"
-        description="Defina cortes percentuais e absolutos por centro de custo e categoria para testar impacto financeiro antes da execução."
+        title="Planeje, simule e salve estratégias de redução de custos"
+        description="Defina cortes percentuais e absolutos por centro/categoria, rode o cenário e transforme resultados em plano executável."
         actions={
           <>
             <button type="button" className="button" onClick={() => applyTemplate("conservative")}>
@@ -158,6 +372,25 @@ export default function SimulacoesPage() {
               Limpar cenário
             </button>
           </>
+        }
+        aside={
+          <div className="hero-score">
+            <p className="hero-score-label">Status do cenário</p>
+            <div className="hero-score-grid">
+              <div>
+                <strong>{centerCuts.length}</strong>
+                <span>centros configurados</span>
+              </div>
+              <div>
+                <strong>{categoryCuts.length}</strong>
+                <span>categorias configuradas</span>
+              </div>
+              <div>
+                <strong>{savedScenarios.length}</strong>
+                <span>cenários salvos</span>
+              </div>
+            </div>
+          </div>
         }
       />
 
@@ -179,6 +412,7 @@ export default function SimulacoesPage() {
               id="simulation-center"
               value={draftCenterId}
               onChange={(event) => setDraftCenterId(event.target.value ? Number(event.target.value) : "")}
+              disabled={dimensionsLoading}
             >
               {centers.map((center) => (
                 <option key={center.id} value={center.id}>
@@ -199,6 +433,7 @@ export default function SimulacoesPage() {
               id="simulation-category"
               value={draftCategoryId}
               onChange={(event) => setDraftCategoryId(event.target.value ? Number(event.target.value) : "")}
+              disabled={dimensionsLoading}
             >
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
@@ -211,139 +446,81 @@ export default function SimulacoesPage() {
             </button>
           </div>
         </div>
+
+        <div className="field">
+          <label htmlFor="scenario-name">Nome do cenário</label>
+          <input
+            id="scenario-name"
+            type="text"
+            placeholder="Ex.: Redução operacional Q2"
+            value={scenarioName}
+            onChange={(event) => setScenarioName(event.target.value)}
+          />
+        </div>
+
+        <div className="filters-actions">
+          <button type="button" className="button button-secondary" onClick={persistScenario}>
+            Salvar cenário
+          </button>
+          {scenarioFeedback && <p className="helper-text">{scenarioFeedback}</p>}
+        </div>
       </section>
 
       <section className="grid panels-grid">
         <Panel title="Cortes por centro de custo" subtitle="Ajustes direcionados para estruturas organizacionais específicas.">
-          {centerCuts.length === 0 ? (
-            <EmptyState>Nenhum centro configurado.</EmptyState>
-          ) : (
-            <div className="cut-list">
-              {centerCuts.map((cut, index) => {
-                const centerName = centers.find((center) => center.id === cut.cost_center_id)?.name ?? "Centro";
-
-                return (
-                  <article className="cut-item" key={cut.cost_center_id}>
-                    <div className="cut-item-head">
-                      <strong>{centerName}</strong>
-                      <button
-                        className="button"
-                        type="button"
-                        onClick={() => setCenterCuts((current) => current.filter((item) => item.cost_center_id !== cut.cost_center_id))}
-                      >
-                        Remover
-                      </button>
-                    </div>
-
-                    <div className="field">
-                      <label>Corte percentual: {cut.percent_cut}%</label>
-                      <input
-                        type="range"
-                        min={0}
-                        max={60}
-                        step={1}
-                        value={cut.percent_cut}
-                        onChange={(event) =>
-                          setCenterCuts((current) =>
-                            current.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, percent_cut: Number(event.target.value) } : item
-                            )
-                          )
-                        }
-                      />
-                    </div>
-
-                    <div className="field">
-                      <label>Corte absoluto (R$)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step={500}
-                        value={cut.absolute_cut}
-                        onChange={(event) =>
-                          setCenterCuts((current) =>
-                            current.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, absolute_cut: Number(event.target.value) } : item
-                            )
-                          )
-                        }
-                      />
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
+          <CenterCutEditor centers={centers} cuts={centerCuts} onChange={setCenterCuts} />
         </Panel>
 
         <Panel title="Cortes por categoria" subtitle="Ajustes para atacar grupos de despesa com maior potencial de redução.">
-          {categoryCuts.length === 0 ? (
-            <EmptyState>Nenhuma categoria configurada.</EmptyState>
+          <CategoryCutEditor categories={categories} cuts={categoryCuts} onChange={setCategoryCuts} />
+        </Panel>
+      </section>
+
+      <section className="grid panels-grid">
+        <Panel title="Biblioteca de cenários salvos" subtitle="Reaproveite estratégias anteriores e acelere ciclos de decisão.">
+          {savedScenarios.length === 0 ? (
+            <EmptyState title="Nenhum cenário salvo">
+              Salve um cenário para reutilizar rapidamente em próximas simulações.
+            </EmptyState>
           ) : (
-            <div className="cut-list">
-              {categoryCuts.map((cut, index) => {
-                const categoryName = categories.find((category) => category.id === cut.category_id)?.name ?? "Categoria";
-
-                return (
-                  <article className="cut-item" key={cut.category_id}>
-                    <div className="cut-item-head">
-                      <strong>{categoryName}</strong>
-                      <button
-                        className="button"
-                        type="button"
-                        onClick={() => setCategoryCuts((current) => current.filter((item) => item.category_id !== cut.category_id))}
-                      >
-                        Remover
-                      </button>
+            <div className="saved-scenario-list">
+              {savedScenarios.map((scenario) => (
+                <article className="saved-scenario-item" key={scenario.id}>
+                  <div>
+                    <h3>{scenario.name}</h3>
+                    <p>
+                      {scenario.startDate} a {scenario.endDate}
+                    </p>
+                    <div className="inline-tags">
+                      <Pill>{scenario.centerCuts.length} centros</Pill>
+                      <Pill>{scenario.categoryCuts.length} categorias</Pill>
                     </div>
-
-                    <div className="field">
-                      <label>Redução percentual: {cut.percent_cut}%</label>
-                      <input
-                        type="range"
-                        min={0}
-                        max={60}
-                        step={1}
-                        value={cut.percent_cut}
-                        onChange={(event) =>
-                          setCategoryCuts((current) =>
-                            current.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, percent_cut: Number(event.target.value) } : item
-                            )
-                          )
-                        }
-                      />
-                    </div>
-
-                    <div className="field">
-                      <label>Redução absoluta (R$)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step={500}
-                        value={cut.absolute_cut}
-                        onChange={(event) =>
-                          setCategoryCuts((current) =>
-                            current.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, absolute_cut: Number(event.target.value) } : item
-                            )
-                          )
-                        }
-                      />
-                    </div>
-                  </article>
-                );
-              })}
+                  </div>
+                  <div className="inline-actions">
+                    <button className="button" type="button" onClick={() => applySavedScenario(scenario)}>
+                      Carregar
+                    </button>
+                    <button className="button button-danger" type="button" onClick={() => removeScenario(scenario.id)}>
+                      Excluir
+                    </button>
+                  </div>
+                </article>
+              ))}
             </div>
           )}
         </Panel>
       </section>
 
-      <div className="inline-actions">
-        <button className="button button-primary" type="button" onClick={executeSimulation} disabled={loading || !hasCuts}>
+      <div className="inline-actions simulation-actions">
+        <button className="button button-primary" type="button" onClick={executeSimulation} disabled={loading}>
           {loading ? "Calculando cenário..." : "Executar simulação"}
         </button>
         {!hasCuts && <p className="helper-text">Adicione pelo menos um corte para executar.</p>}
+        {result && (
+          <button className="button" type="button" onClick={exportCsv}>
+            Exportar resultado (CSV)
+          </button>
+        )}
       </div>
 
       {error && <Notice kind="error">{error}</Notice>}
@@ -351,10 +528,10 @@ export default function SimulacoesPage() {
       {result && (
         <>
           <section className="grid metrics-grid">
-            <KpiCard label="Baseline" value={money.format(result.baseline_total)} subtitle="Custo total de referência" />
-            <KpiCard label="Projetado" value={money.format(result.projected_total)} subtitle="Após aplicação dos cortes" />
-            <KpiCard label="Economia estimada" value={money.format(result.estimated_savings)} tone="positive" />
-            <KpiCard label="Impacto percentual" value={`${result.impact_percent.toFixed(2)}%`} tone="positive" />
+            <KpiCard label="Baseline" value={formatCurrency(result.baseline_total)} subtitle="Custo total de referência" />
+            <KpiCard label="Projetado" value={formatCurrency(result.projected_total)} subtitle="Após aplicação dos cortes" />
+            <KpiCard label="Economia estimada" value={formatCurrency(result.estimated_savings)} tone="positive" />
+            <KpiCard label="Impacto percentual" value={formatCompactPercent(result.impact_percent)} tone="positive" />
           </section>
 
           <section className="grid panels-grid">
@@ -363,27 +540,28 @@ export default function SimulacoesPage() {
             </Panel>
 
             <Panel title="Ranking de impacto por categoria" subtitle="Categorias priorizadas para execução do plano de redução.">
-              <div className="table-shell">
+              <div className="table-shell" role="region" aria-label="Tabela de impacto por categoria">
                 <table>
+                  <caption className="table-caption">Resumo consolidado das categorias no cenário simulado.</caption>
                   <thead>
                     <tr>
-                      <th>Categoria</th>
-                      <th>Baseline</th>
-                      <th>Projetado</th>
-                      <th>Economia</th>
-                      <th>Impacto</th>
+                      <th scope="col">Categoria</th>
+                      <th scope="col">Baseline</th>
+                      <th scope="col">Projetado</th>
+                      <th scope="col">Economia</th>
+                      <th scope="col">Impacto</th>
                     </tr>
                   </thead>
                   <tbody>
                     {result.category_impact_ranking.map((item) => (
                       <tr key={item.entity_id}>
                         <td>{item.entity_name}</td>
-                        <td>{money.format(item.baseline_amount)}</td>
-                        <td>{money.format(item.projected_amount)}</td>
+                        <td>{formatCurrency(item.baseline_amount)}</td>
+                        <td>{formatCurrency(item.projected_amount)}</td>
                         <td>
-                          <span className="badge badge-positive">{money.format(item.estimated_savings)}</span>
+                          <span className="badge badge-positive">{formatCurrency(item.estimated_savings)}</span>
                         </td>
-                        <td>{item.impact_percent.toFixed(2)}%</td>
+                        <td>{formatCompactPercent(item.impact_percent)}</td>
                       </tr>
                     ))}
                   </tbody>

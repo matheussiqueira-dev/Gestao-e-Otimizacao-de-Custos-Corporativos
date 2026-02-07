@@ -1,11 +1,14 @@
 "use client";
 
-import { ArcElement, BarElement, CategoryScale, Chart as ChartJS, Legend, LineElement, LinearScale, PointElement, Tooltip } from "chart.js";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, Doughnut, Line } from "react-chartjs-2";
 
-import { EmptyState, HeroSection, KpiCard, Notice, Panel } from "@/components/ui";
-import { getAnomalies, getCostOverview, getQuickWins, getWasteRanking, listCostCenters, listProjects } from "@/lib/api";
+import { EmptyState, HeroSection, KpiCard, Notice, Panel, Pill } from "@/components/ui";
+import { getAnomalies, getCostOverview, getQuickWins, getWasteRanking, listCategories, listCostCenters, listProjects } from "@/lib/api";
+import { ensureChartsRegistered } from "@/lib/chart";
+import { getDefaultDashboardDates, getPreviousPeriodRange, isDateWindowValid } from "@/lib/date";
+import { formatCompactPercent, formatCurrency, formatMonthLabel } from "@/lib/format";
 import {
   AnomalyDetectionResponse,
   CostOverviewResponse,
@@ -14,74 +17,131 @@ import {
   WasteRankingResponse
 } from "@/lib/types";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend);
+ensureChartsRegistered();
 
-const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+type DashboardFilters = {
+  startDate: string;
+  endDate: string;
+  centerId: number | "";
+  projectId: number | "";
+  categoryId: number | "";
+};
 
-function toInputDate(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatMonthLabel(month: string): string {
-  const [year, monthIndex] = month.split("-");
-  const safe = new Date(Number(year), Number(monthIndex) - 1, 1);
-  return safe.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" });
-}
-
-function getDefaultDates() {
-  const now = new Date();
-  const endDate = toInputDate(now);
-  const start = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-  const startDate = toInputDate(start);
-  return { startDate, endDate };
+function parseNumericParam(value: string | null): number | "" {
+  if (!value) {
+    return "";
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : "";
 }
 
 export default function DashboardPage() {
-  const defaults = getDefaultDates();
-  const [startDate, setStartDate] = useState(defaults.startDate);
-  const [endDate, setEndDate] = useState(defaults.endDate);
-  const [selectedCenterId, setSelectedCenterId] = useState<number | "">("");
-  const [selectedProjectId, setSelectedProjectId] = useState<number | "">("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const defaults = useMemo(() => getDefaultDashboardDates(), []);
+  const [draftFilters, setDraftFilters] = useState<DashboardFilters>({
+    startDate: defaults.startDate,
+    endDate: defaults.endDate,
+    centerId: "",
+    projectId: "",
+    categoryId: ""
+  });
+  const [appliedFilters, setAppliedFilters] = useState<DashboardFilters>({
+    startDate: defaults.startDate,
+    endDate: defaults.endDate,
+    centerId: "",
+    projectId: "",
+    categoryId: ""
+  });
   const [centers, setCenters] = useState<DimensionItem[]>([]);
   const [projects, setProjects] = useState<DimensionItem[]>([]);
+  const [categories, setCategories] = useState<DimensionItem[]>([]);
   const [overview, setOverview] = useState<CostOverviewResponse | null>(null);
+  const [previousOverview, setPreviousOverview] = useState<CostOverviewResponse | null>(null);
   const [waste, setWaste] = useState<WasteRankingResponse | null>(null);
   const [anomalies, setAnomalies] = useState<AnomalyDetectionResponse | null>(null);
   const [quickWins, setQuickWins] = useState<QuickWinsResponse | null>(null);
+  const [dimensionsLoading, setDimensionsLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl: DashboardFilters = {
+      startDate: params.get("start") ?? defaults.startDate,
+      endDate: params.get("end") ?? defaults.endDate,
+      centerId: parseNumericParam(params.get("center")),
+      projectId: parseNumericParam(params.get("project")),
+      categoryId: parseNumericParam(params.get("category"))
+    };
+    setDraftFilters(fromUrl);
+    setAppliedFilters(fromUrl);
+  }, [defaults.endDate, defaults.startDate]);
 
   useEffect(() => {
     const loadDimensions = async () => {
-      const [loadedCenters, loadedProjects] = await Promise.all([listCostCenters(), listProjects()]);
+      const [loadedCenters, loadedProjects, loadedCategories] = await Promise.all([
+        listCostCenters(),
+        listProjects(),
+        listCategories()
+      ]);
       setCenters(loadedCenters);
       setProjects(loadedProjects);
+      setCategories(loadedCategories);
+      setDimensionsLoading(false);
     };
 
-    loadDimensions().catch(() => setError("Falha ao carregar dimensões de filtro."));
+    loadDimensions().catch(() => {
+      setDimensionsLoading(false);
+      setError("Falha ao carregar dimensões de filtro.");
+    });
   }, []);
 
   useEffect(() => {
+    const isWindowValid = isDateWindowValid({
+      startDate: appliedFilters.startDate,
+      endDate: appliedFilters.endDate
+    });
+
+    if (!isWindowValid) {
+      setError("A data inicial precisa ser menor ou igual à data final.");
+      setLoading(false);
+      return;
+    }
+
     const loadDashboard = async () => {
       setLoading(true);
       setError(null);
+
+      const previousWindow = getPreviousPeriodRange({
+        startDate: appliedFilters.startDate,
+        endDate: appliedFilters.endDate
+      });
+
       try {
-        const [overviewData, wasteData, anomalyData, quickWinData] = await Promise.all([
+        const [overviewData, previousOverviewData, wasteData, anomalyData, quickWinData] = await Promise.all([
           getCostOverview({
-            startDate,
-            endDate,
-            costCenterIds: selectedCenterId ? [selectedCenterId] : undefined,
-            projectIds: selectedProjectId ? [selectedProjectId] : undefined
+            startDate: appliedFilters.startDate,
+            endDate: appliedFilters.endDate,
+            costCenterIds: appliedFilters.centerId ? [appliedFilters.centerId] : undefined,
+            projectIds: appliedFilters.projectId ? [appliedFilters.projectId] : undefined,
+            categoryIds: appliedFilters.categoryId ? [appliedFilters.categoryId] : undefined
           }),
-          getWasteRanking({ endDate, lookbackMonths: 3, topN: 10 }),
-          getAnomalies({ endDate, lookbackMonths: 12, thresholdZ: 2.0, topN: 8 }),
-          getQuickWins({ endDate, lookbackMonths: 6, topN: 8, minimumTotal: 7000, targetReductionPercent: 8 })
+          getCostOverview({
+            startDate: previousWindow.startDate,
+            endDate: previousWindow.endDate,
+            costCenterIds: appliedFilters.centerId ? [appliedFilters.centerId] : undefined,
+            projectIds: appliedFilters.projectId ? [appliedFilters.projectId] : undefined,
+            categoryIds: appliedFilters.categoryId ? [appliedFilters.categoryId] : undefined
+          }),
+          getWasteRanking({ endDate: appliedFilters.endDate, lookbackMonths: 3, topN: 10 }),
+          getAnomalies({ endDate: appliedFilters.endDate, lookbackMonths: 12, thresholdZ: 2.0, topN: 8 }),
+          getQuickWins({ endDate: appliedFilters.endDate, lookbackMonths: 6, topN: 8, minimumTotal: 7000, targetReductionPercent: 8 })
         ]);
 
         setOverview(overviewData);
+        setPreviousOverview(previousOverviewData);
         setWaste(wasteData);
         setAnomalies(anomalyData);
         setQuickWins(quickWinData);
@@ -93,7 +153,15 @@ export default function DashboardPage() {
     };
 
     loadDashboard().catch(() => setError("Erro ao carregar dashboard."));
-  }, [startDate, endDate, selectedCenterId, selectedProjectId]);
+  }, [appliedFilters]);
+
+  useEffect(() => {
+    if (!shareFeedback) {
+      return;
+    }
+    const timer = setTimeout(() => setShareFeedback(null), 2500);
+    return () => clearTimeout(timer);
+  }, [shareFeedback]);
 
   const trendChart = useMemo(() => {
     if (!overview) {
@@ -106,8 +174,8 @@ export default function DashboardPage() {
         {
           label: "Custos totais",
           data: overview.trend.map((item) => item.total_amount),
-          borderColor: "#0f7b8f",
-          backgroundColor: "rgba(15, 123, 143, 0.14)",
+          borderColor: "#0f4c81",
+          backgroundColor: "rgba(15, 76, 129, 0.18)",
           borderWidth: 2,
           pointRadius: 3,
           tension: 0.3
@@ -127,7 +195,7 @@ export default function DashboardPage() {
         {
           label: "Total por centro",
           data: overview.by_cost_center.map((item) => item.total_amount),
-          backgroundColor: "#d68b23"
+          backgroundColor: "#3db9a8"
         }
       ]
     };
@@ -138,7 +206,7 @@ export default function DashboardPage() {
       return null;
     }
 
-    const palette = ["#0f7b8f", "#d68b23", "#1f8a5c", "#2f4f88", "#bf3f4a", "#8f6cb7"];
+    const palette = ["#0f4c81", "#3db9a8", "#f29f4b", "#6a7ccf", "#de5f54", "#47a2d7"];
     return {
       labels: overview.by_category.map((item) => item.category ?? "N/A"),
       datasets: [
@@ -155,31 +223,118 @@ export default function DashboardPage() {
     return (quickWins?.items ?? []).slice(0, 3).reduce((sum, item) => sum + item.estimated_savings, 0);
   }, [quickWins]);
 
+  const totalDelta = useMemo(() => {
+    if (!overview || !previousOverview || previousOverview.total_cost <= 0) {
+      return null;
+    }
+
+    return ((overview.total_cost - previousOverview.total_cost) / previousOverview.total_cost) * 100;
+  }, [overview, previousOverview]);
+
+  const activeFilterCount = useMemo(() => {
+    return [appliedFilters.centerId, appliedFilters.projectId, appliedFilters.categoryId].filter(Boolean).length;
+  }, [appliedFilters.categoryId, appliedFilters.centerId, appliedFilters.projectId]);
+
+  const applyFilters = () => {
+    if (!isDateWindowValid({ startDate: draftFilters.startDate, endDate: draftFilters.endDate })) {
+      setError("A data inicial precisa ser menor ou igual à data final.");
+      return;
+    }
+
+    setAppliedFilters(draftFilters);
+    const params = new URLSearchParams();
+    params.set("start", draftFilters.startDate);
+    params.set("end", draftFilters.endDate);
+    if (draftFilters.centerId) {
+      params.set("center", String(draftFilters.centerId));
+    }
+    if (draftFilters.projectId) {
+      params.set("project", String(draftFilters.projectId));
+    }
+    if (draftFilters.categoryId) {
+      params.set("category", String(draftFilters.categoryId));
+    }
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const clearFilters = () => {
+    const reset = {
+      startDate: defaults.startDate,
+      endDate: defaults.endDate,
+      centerId: "",
+      projectId: "",
+      categoryId: ""
+    } as DashboardFilters;
+
+    setDraftFilters(reset);
+    setAppliedFilters(reset);
+    router.replace(pathname, { scroll: false });
+  };
+
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareFeedback("Link copiado.");
+    } catch {
+      setShareFeedback("Não foi possível copiar o link.");
+    }
+  };
+
   return (
     <>
       <HeroSection
         eyebrow="Visão executiva"
-        title="Dashboard de custos com alertas de desperdício e oportunidades priorizadas"
-        description="Monitore tendência, distribuição, desperdícios, anomalias e quick wins financeiros para direcionar ações de redução com maior retorno."
+        title="Dashboard de custos com foco em ação, não apenas visualização"
+        description="Monitore tendência, distribuição, desperdícios, anomalias e quick wins com filtros compartilháveis e comparação automática com o período anterior."
+        aside={
+          <div className="hero-score">
+            <p className="hero-score-label">Contexto da análise</p>
+            <div className="hero-score-grid">
+              <div>
+                <strong>{activeFilterCount}</strong>
+                <span>filtros ativos</span>
+              </div>
+              <div>
+                <strong>{overview ? overview.trend.length : "-"}</strong>
+                <span>meses analisados</span>
+              </div>
+              <div>
+                <strong>{quickWins ? quickWins.items.length : "-"}</strong>
+                <span>quick wins mapeados</span>
+              </div>
+            </div>
+          </div>
+        }
       />
 
       <section className="filters-grid" aria-label="Filtros do dashboard">
         <div className="field">
           <label htmlFor="dashboard-start-date">Data inicial</label>
-          <input id="dashboard-start-date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+          <input
+            id="dashboard-start-date"
+            type="date"
+            value={draftFilters.startDate}
+            onChange={(event) => setDraftFilters((current) => ({ ...current, startDate: event.target.value }))}
+          />
         </div>
 
         <div className="field">
           <label htmlFor="dashboard-end-date">Data final</label>
-          <input id="dashboard-end-date" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+          <input
+            id="dashboard-end-date"
+            type="date"
+            value={draftFilters.endDate}
+            onChange={(event) => setDraftFilters((current) => ({ ...current, endDate: event.target.value }))}
+          />
         </div>
 
         <div className="field">
           <label htmlFor="dashboard-center">Centro de custo</label>
           <select
             id="dashboard-center"
-            value={selectedCenterId}
-            onChange={(event) => setSelectedCenterId(event.target.value ? Number(event.target.value) : "")}
+            value={draftFilters.centerId}
+            onChange={(event) => setDraftFilters((current) => ({ ...current, centerId: parseNumericParam(event.target.value) }))}
+            disabled={dimensionsLoading}
           >
             <option value="">Todos</option>
             {centers.map((center) => (
@@ -194,8 +349,9 @@ export default function DashboardPage() {
           <label htmlFor="dashboard-project">Projeto</label>
           <select
             id="dashboard-project"
-            value={selectedProjectId}
-            onChange={(event) => setSelectedProjectId(event.target.value ? Number(event.target.value) : "")}
+            value={draftFilters.projectId}
+            onChange={(event) => setDraftFilters((current) => ({ ...current, projectId: parseNumericParam(event.target.value) }))}
+            disabled={dimensionsLoading}
           >
             <option value="">Todos</option>
             {projects.map((project) => (
@@ -205,6 +361,36 @@ export default function DashboardPage() {
             ))}
           </select>
         </div>
+
+        <div className="field">
+          <label htmlFor="dashboard-category">Categoria</label>
+          <select
+            id="dashboard-category"
+            value={draftFilters.categoryId}
+            onChange={(event) => setDraftFilters((current) => ({ ...current, categoryId: parseNumericParam(event.target.value) }))}
+            disabled={dimensionsLoading}
+          >
+            <option value="">Todas</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="filters-actions">
+          <button type="button" className="button button-primary" onClick={applyFilters} disabled={loading}>
+            Aplicar filtros
+          </button>
+          <button type="button" className="button" onClick={clearFilters}>
+            Limpar
+          </button>
+          <button type="button" className="button button-secondary" onClick={copyShareLink}>
+            Compartilhar visão
+          </button>
+          {shareFeedback && <p className="helper-text">{shareFeedback}</p>}
+        </div>
       </section>
 
       {error && <Notice kind="error">{error}</Notice>}
@@ -213,17 +399,33 @@ export default function DashboardPage() {
       {!loading && overview && (
         <>
           <section className="grid metrics-grid">
-            <KpiCard label="Custo total" value={money.format(overview.total_cost)} subtitle="Período filtrado" />
-            <KpiCard label="Média mensal" value={money.format(overview.monthly_average)} subtitle="Referência de baseline" />
+            <KpiCard
+              label="Custo total"
+              value={formatCurrency(overview.total_cost)}
+              subtitle={
+                <>
+                  Período filtrado
+                  {totalDelta !== null && (
+                    <>
+                      {" "}
+                      <Pill tone={totalDelta <= 0 ? "positive" : "danger"}>{`${totalDelta <= 0 ? "↓" : "↑"} ${formatCompactPercent(
+                        Math.abs(totalDelta)
+                      )}`}</Pill>
+                    </>
+                  )}
+                </>
+              }
+            />
+            <KpiCard label="Média mensal" value={formatCurrency(overview.monthly_average)} subtitle="Referência de baseline" />
             <KpiCard
               label="Quick wins (top 3)"
-              value={money.format(quickWinPotential)}
+              value={formatCurrency(quickWinPotential)}
               subtitle="Potencial de economia imediata"
               tone="positive"
             />
             <KpiCard
               label="Maior desperdício"
-              value={money.format(waste?.items[0]?.estimated_waste ?? 0)}
+              value={formatCurrency(waste?.items[0]?.estimated_waste ?? 0)}
               subtitle="Comparação com período anterior"
               tone="danger"
             />
@@ -245,14 +447,15 @@ export default function DashboardPage() {
             </Panel>
 
             <Panel title="Top desperdícios recentes" subtitle="Itens com maior variação positiva contra período comparável.">
-              <div className="table-shell">
+              <div className="table-shell" role="region" aria-label="Tabela de desperdícios recentes">
                 <table>
+                  <caption className="table-caption">Desperdícios com maior desvio percentual no período.</caption>
                   <thead>
                     <tr>
-                      <th>Centro</th>
-                      <th>Categoria</th>
-                      <th>Desperdício</th>
-                      <th>Variação</th>
+                      <th scope="col">Centro</th>
+                      <th scope="col">Categoria</th>
+                      <th scope="col">Desperdício</th>
+                      <th scope="col">Variação</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -260,10 +463,10 @@ export default function DashboardPage() {
                       <tr key={`${item.cost_center}-${item.category}`}>
                         <td>{item.cost_center}</td>
                         <td>{item.category}</td>
-                        <td>{money.format(item.estimated_waste)}</td>
+                        <td>{formatCurrency(item.estimated_waste)}</td>
                         <td>
                           <span className={`badge ${item.variation_percent >= 0 ? "badge-danger" : "badge-positive"}`}>
-                            {item.variation_percent.toFixed(1)}%
+                            {formatCompactPercent(item.variation_percent)}
                           </span>
                         </td>
                       </tr>
@@ -277,15 +480,16 @@ export default function DashboardPage() {
           <section className="grid panels-grid">
             <Panel title="Anomalias de custo" subtitle="Eventos com z-score acima do limiar estatístico monitorado.">
               {anomalies && anomalies.items.length > 0 ? (
-                <div className="table-shell">
+                <div className="table-shell" role="region" aria-label="Tabela de anomalias de custo">
                   <table>
+                    <caption className="table-caption">Ocorrências com comportamento anômalo frente ao histórico.</caption>
                     <thead>
                       <tr>
-                        <th>Mês</th>
-                        <th>Centro</th>
-                        <th>Categoria</th>
-                        <th>Valor</th>
-                        <th>Z-score</th>
+                        <th scope="col">Mês</th>
+                        <th scope="col">Centro</th>
+                        <th scope="col">Categoria</th>
+                        <th scope="col">Valor</th>
+                        <th scope="col">Z-score</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -294,7 +498,7 @@ export default function DashboardPage() {
                           <td>{formatMonthLabel(item.month)}</td>
                           <td>{item.cost_center}</td>
                           <td>{item.category}</td>
-                          <td>{money.format(item.amount)}</td>
+                          <td>{formatCurrency(item.amount)}</td>
                           <td>{item.z_score.toFixed(2)}</td>
                         </tr>
                       ))}
@@ -302,7 +506,9 @@ export default function DashboardPage() {
                   </table>
                 </div>
               ) : (
-                <EmptyState>Nenhuma anomalia relevante foi detectada no período analisado.</EmptyState>
+                <EmptyState title="Sem anomalias relevantes">
+                  Nenhuma anomalia relevante foi detectada para os filtros aplicados.
+                </EmptyState>
               )}
             </Panel>
 
@@ -321,14 +527,16 @@ export default function DashboardPage() {
                         <span style={{ width: `${Math.min(100, item.opportunity_score)}%` }} />
                       </div>
                       <p className="helper-text">
-                        Potencial estimado: <strong>{money.format(item.estimated_savings)}</strong> com redução alvo de{" "}
+                        Potencial estimado: <strong>{formatCurrency(item.estimated_savings)}</strong> com redução alvo de{" "}
                         {quickWins.target_reduction_percent.toFixed(0)}%.
                       </p>
                     </article>
                   ))}
                 </div>
               ) : (
-                <EmptyState>Não foram encontradas oportunidades acima do mínimo configurado.</EmptyState>
+                <EmptyState title="Sem quick wins acima do limiar">
+                  Não foram encontradas oportunidades acima do mínimo configurado.
+                </EmptyState>
               )}
             </Panel>
           </section>
