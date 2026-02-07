@@ -1,15 +1,18 @@
 import json
 from typing import Any
 
-import redis
-
 from app.core.config import get_settings
+
+try:
+    import redis  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - environment fallback
+    redis = None  # type: ignore
 
 
 class RedisCache:
     def __init__(self) -> None:
         settings = get_settings()
-        self._enabled = settings.cache_enabled
+        self._enabled = settings.cache_enabled and redis is not None
         self._default_ttl = settings.cache_ttl_seconds
         self._client = redis.Redis.from_url(settings.redis_url, decode_responses=True) if self._enabled else None
 
@@ -37,4 +40,3 @@ class RedisCache:
 
 
 cache = RedisCache()
-
