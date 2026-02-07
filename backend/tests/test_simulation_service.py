@@ -3,8 +3,14 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.simulations import CutByCenter, CutByCategory, SimulationRequest
-from app.services.cost_service import SimulationService
+from app.schemas.simulations import (
+    CutByCenter,
+    CutByCategory,
+    SimulationComparisonRequest,
+    SimulationRequest,
+    SimulationScenarioInput,
+)
+from app.services import SimulationService
 
 
 class FakeRepository:
@@ -85,3 +91,28 @@ def test_simulation_request_rejects_invalid_period() -> None:
             end_date=date(2025, 1, 1),
             category_cuts=[CutByCategory(category_id=1, percent_cut=5)],
         )
+
+
+def test_simulation_compare_ranks_best_scenario() -> None:
+    service = SimulationService(FakeRepository())  # type: ignore[arg-type]
+    payload = SimulationComparisonRequest(
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 1, 31),
+        scenarios=[
+            SimulationScenarioInput(
+                scenario_name="Conservador",
+                center_cuts=[CutByCenter(cost_center_id=1, percent_cut=5)],
+            ),
+            SimulationScenarioInput(
+                scenario_name="Agressivo",
+                center_cuts=[CutByCenter(cost_center_id=1, percent_cut=15)],
+                category_cuts=[CutByCategory(category_id=1, percent_cut=10)],
+            ),
+        ],
+    )
+
+    result = service.compare(payload)
+
+    assert result.best_scenario == "Agressivo"
+    assert result.items[0].rank == 1
+    assert result.items[0].estimated_savings >= result.items[1].estimated_savings

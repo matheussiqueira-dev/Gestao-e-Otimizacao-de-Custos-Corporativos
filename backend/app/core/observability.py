@@ -49,14 +49,14 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none';"
 
         logger = logging.getLogger("app.request")
-        logger.info(
-            "%s %s -> %s (%sms)",
-            request.method,
-            request.url.path,
-            response.status_code,
-            elapsed_ms,
-        )
+        if elapsed_ms > 1200:
+            logger.warning("%s %s -> %s (%sms)", request.method, request.url.path, response.status_code, elapsed_ms)
+        else:
+            logger.info("%s %s -> %s (%sms)", request.method, request.url.path, response.status_code, elapsed_ms)
         request_id_ctx.reset(token)
         return response

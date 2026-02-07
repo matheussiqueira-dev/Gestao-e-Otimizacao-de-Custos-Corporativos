@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.services.cost_service import AnalyticsService
+from app.services import AnalyticsService
 
 
 class FakeAnalyticsRepository:

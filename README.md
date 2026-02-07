@@ -1,164 +1,237 @@
-# Cost Intelligence Platform - Frontend
+# Cost Intelligence Platform - Backend
 
-Aplicação web executiva para gestão e otimização de custos corporativos, com foco em tomada de decisão financeira baseada em dados.
+Backend da plataforma de gestão e otimização de custos corporativos, construído para cenários reais de governança financeira com foco em robustez, segurança e escalabilidade.
 
-## Visão geral do frontend
+## Visão geral do backend
 
-O frontend foi projetado para apoiar CFOs, controllers e lideranças financeiras em três fluxos principais:
+O backend expõe APIs para:
 
-1. Monitoramento executivo de custos (`/dashboard`): visão consolidada de tendência, distribuição, desperdícios, anomalias e quick wins.
-2. Simulação de cenários (`/simulacoes`): planejamento de cortes por centro/categoria com impacto estimado e ranking de prioridade.
-3. Camada analítica (`/bi`): integração com Apache Superset para exploração avançada e governança recorrente.
+- Consolidação de custos por período, centro, projeto e categoria.
+- Simulações de redução com impacto financeiro estimado.
+- Detecção de desperdícios, anomalias e oportunidades (quick wins).
+- Governança orçamentária com análise de variação entre orçado e realizado.
+- Comparação de múltiplos cenários de simulação para priorização executiva.
 
-## Stack e tecnologias utilizadas
+## Domínio e regras principais
 
-- Next.js 14 (App Router)
-- React 18
-- TypeScript (strict)
-- Chart.js + react-chartjs-2
-- CSS global com design tokens e componentes reutilizáveis
+- O custo é registrado por `CostEntry` (centro de custo, projeto, categoria, data de referência e valor).
+- Simulações aceitam cortes percentuais e absolutos por centro/categoria.
+- Simulações exigem pelo menos um corte válido e não aceitam entidades duplicadas.
+- Analytics compara períodos equivalentes e classifica maior desperdício por variação positiva.
+- Orçamento (`BudgetEntry`) é consolidado por mês e comparado com realizado para alertas de desvio.
 
-## Arquitetura frontend
+## Arquitetura adotada
 
-### Organização
+Arquitetura modular em camadas (monólito modular):
+
+1. `API` (FastAPI): rotas, contratos HTTP e autorização.
+2. `Services`: regras de negócio e orquestração de casos de uso.
+3. `Repository` (SQLAlchemy): acesso ao banco e consultas agregadas.
+4. `Core`: configuração, observabilidade, cache, segurança e middlewares.
+
+## Tecnologias utilizadas
+
+- Python 3.12+
+- FastAPI
+- SQLAlchemy 2
+- PostgreSQL
+- Redis
+- Pydantic v2
+- Uvicorn
+- Pytest
+
+## Estrutura do projeto
 
 ```text
-frontend
+backend
 ├── app
-│   ├── bi/page.tsx
-│   ├── dashboard/page.tsx
-│   ├── simulacoes/page.tsx
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx
-├── components
-│   ├── top-navigation.tsx
-│   └── ui.tsx
-├── lib
-│   ├── api.ts
-│   ├── chart.ts
-│   ├── date.ts
-│   ├── format.ts
-│   ├── scenario-storage.ts
-│   └── types.ts
-├── package.json
-└── tsconfig.json
+│   ├── api
+│   │   ├── dependencies.py
+│   │   ├── router.py
+│   │   └── v1
+│   │       ├── routes_analytics.py
+│   │       ├── routes_budgets.py
+│   │       ├── routes_costs.py
+│   │       └── routes_simulations.py
+│   ├── core
+│   │   ├── cache.py
+│   │   ├── config.py
+│   │   ├── exceptions.py
+│   │   ├── observability.py
+│   │   └── security.py
+│   ├── db
+│   │   ├── init_db.py
+│   │   └── session.py
+│   ├── models
+│   ├── repositories
+│   │   └── cost_repository.py
+│   ├── schemas
+│   │   ├── analytics.py
+│   │   ├── budgets.py
+│   │   ├── costs.py
+│   │   ├── opportunities.py
+│   │   └── simulations.py
+│   ├── services
+│   │   ├── analytics_service.py
+│   │   ├── budget_service.py
+│   │   ├── cost_service.py
+│   │   └── simulation_service.py
+│   └── main.py
+└── tests
+    ├── test_analytics_service.py
+    ├── test_budget_service.py
+    ├── test_security.py
+    └── test_simulation_service.py
 ```
 
-### Padrões adotados
+## Segurança e confiabilidade
 
-- UI componentizada em `components/ui.tsx` (Hero, Panel, KPI, Notice, Empty State, Pill).
-- Tokens visuais centralizados em `app/globals.css` para consistência de cores, espaçamentos, estados e responsividade.
-- Camada de API isolada em `lib/api.ts` com timeout, tratamento de erro e headers padronizados.
-- Utilitários de data/formatação em `lib/date.ts` e `lib/format.ts` para reduzir duplicação.
+### Autenticação e autorização
 
-## Melhorias implementadas nesta refatoração
+- API Key opcional por ambiente (`AUTH_ENABLED`).
+- Autorização por escopo (`require_scope`) por endpoint.
+- Comparação de chave com `secrets.compare_digest` (mitiga timing attack).
+- Suporte a múltiplas chaves e escopos via `API_KEYS_JSON`.
 
-### 1) UI/UX (refactor completo)
+Escopos usados:
 
-- Redesign completo da interface com nova hierarquia visual e identidade mais executiva.
-- Navegação mobile acessível com menu colapsável.
-- Hero sections com contexto operacional por módulo.
-- Superfícies, cards, tabelas e formulários padronizados por design system.
-- Melhorias de leitura, contraste, feedback visual e estados vazios.
+- `costs:read`
+- `analytics:read`
+- `budgets:read`
+- `simulations:write`
 
-### 2) Performance e escalabilidade
+### Proteções e hardening
 
-- Remoção de duplicação de lógica de datas e formatação.
-- Registro de Chart.js centralizado (`lib/chart.ts`) para evitar repetição.
-- Fluxo de filtros no dashboard otimizado com ação explícita de “Aplicar filtros” (menos requisições desnecessárias).
-- Refactor da página de simulação com componentes internos reutilizáveis para edição de cortes.
+- `TrustedHostMiddleware` para host allowlist.
+- Rate limiting por IP (`RateLimitMiddleware`).
+- Security headers:
+  - `X-Content-Type-Options: nosniff`
+  - `X-Frame-Options: DENY`
+  - `Referrer-Policy`
+  - `Permissions-Policy`
+  - `Content-Security-Policy`
+- Tratamento global de exceções com `request_id` para rastreabilidade.
 
-### 3) Acessibilidade e usabilidade
+### Observabilidade
 
-- `skip link` para navegação por teclado.
-- `aria-label`, `aria-live`, `caption` e `scope` em tabelas/feedbacks críticos.
-- Estados de foco visíveis em controles interativos.
-- Melhor responsividade para desktop e mobile.
+- Request ID propagado em logs e resposta (`X-Request-ID`).
+- Logging contextual por request.
+- Alertas de latência alta por request no middleware.
 
-### 4) Novas funcionalidades
+## Performance e escalabilidade
 
-- Dashboard:
-  - Comparação automática com período anterior.
-  - Compartilhamento de visão por URL (filtros persistidos em query string).
-  - Novo filtro por categoria.
-- Simulações:
-  - Biblioteca de cenários salva no `localStorage` (salvar, carregar e excluir).
-  - Exportação de resultado para CSV.
-- BI:
-  - Status visual de integração do Superset.
-  - Ação direta para abrir dashboard em nova aba.
+- Pool de conexões SQL configurável (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE_SECONDS`).
+- Cache Redis com chaves estáveis hashadas (SHA-256).
+- `get_or_set_json` para evitar repetição de lógica de cache.
+- GZip middleware para redução de payload.
+- Filtros defensivos com limite de cardinalidade para evitar consultas abusivas.
 
-## SEO técnico
+## API (v1)
 
-- Metadados globais melhorados em `app/layout.tsx`:
-  - `title` com template
-  - `description`
-  - `openGraph`
-  - `twitter`
-  - `robots`
-  - `canonical`
+Base path: `/api/v1`
 
-## Instruções de setup e execução
+### Custos
 
-### Pré-requisitos
+- `GET /costs/aggregate`
+- `GET /costs/overview`
+- `GET /dimensions/cost-centers`
+- `GET /dimensions/projects`
+- `GET /dimensions/categories`
 
-- Node.js 20+
-- npm 10+
-- Backend da plataforma disponível (FastAPI)
+### Analytics
 
-### Variáveis de ambiente (`frontend/.env.local`)
+- `GET /waste/ranking`
+- `GET /anomalies/detect`
+- `GET /opportunities/quick-wins`
+
+### Simulações
+
+- `POST /simulations/run`
+- `POST /simulations/compare` (nova feature)
+
+### Orçamento
+
+- `GET /budgets/variance` (nova feature)
+
+## Setup e execução
+
+### Variáveis de ambiente (`backend/.env`)
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-NEXT_PUBLIC_SUPERSET_EMBED_URL=http://localhost:8088/superset/dashboard/1/?standalone=1
-NEXT_PUBLIC_API_KEY=costintel-dev-key
+APP_NAME=Cost Intelligence Platform
+APP_VERSION=1.2.0
+API_V1_PREFIX=/api/v1
+DEBUG=true
+ENVIRONMENT=development
+
+DATABASE_URL=postgresql+psycopg://cost_user:cost_pass@localhost:5432/costintel
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+DB_POOL_RECYCLE_SECONDS=1800
+
+REDIS_URL=redis://localhost:6379/0
+CACHE_ENABLED=true
+CACHE_TTL_SECONDS=300
+
+ALLOWED_ORIGINS=http://localhost:3000
+ALLOWED_HOSTS=*
+
+AUTH_ENABLED=false
+API_KEY_HEADER_NAME=X-API-Key
+API_KEY_VALUE=costintel-dev-key
+API_KEYS_JSON={"costintel-dev-key": ["*"]}
+
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=120
+RATE_LIMIT_WINDOW_SECONDS=60
+
+LOG_LEVEL=INFO
 ```
 
-### Instalação
+### Execução local
 
 ```bash
-cd frontend
-npm install
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 ```
 
-### Desenvolvimento
+### Inicialização do banco
 
 ```bash
-npm run dev
+python -m app.db.init_db
 ```
 
-Aplicação disponível em `http://localhost:3000`.
-
-### Build de produção
+ou via SQL do monorepo:
 
 ```bash
-npm run build
-npm run start
+psql -h localhost -U cost_user -d costintel -f db/schema.sql
+psql -h localhost -U cost_user -d costintel -f db/seeds/seed_data.sql
 ```
 
-### Qualidade
+### Testes
 
 ```bash
-npm run lint
-npm run build
+cd backend
+python -m pytest
 ```
 
-## Boas práticas adotadas
+## Boas práticas e padrões aplicados
 
-- Componentização com responsabilidade única.
-- Reutilização de utilitários para evitar divergência de regra.
-- Tratamento defensivo de erros de rede e timeout.
-- Estrutura visual baseada em tokens e semântica consistente.
-- Foco em acessibilidade e navegabilidade por teclado.
+- Separação clara por camada (API, serviços, repositório, core).
+- Contratos tipados com Pydantic e validações de domínio.
+- DRY em cache, composição de query SQL e validação de filtros.
+- Tratamento de erro consistente com payload padronizado.
+- Princípio de menor privilégio por escopo de rota.
+- Testes unitários para regras críticas de simulação, analytics, orçamento e segurança.
 
 ## Melhorias futuras
 
-- Testes E2E com Playwright para fluxos críticos.
-- Internacionalização (i18n) para múltiplos idiomas.
-- Persistência server-side de cenários com versionamento.
-- Camada de autenticação/autorização por perfil (RBAC).
-- Monitoramento de Web Vitals e orçamento de performance por rota.
+- Persistência de cenários de simulação (versionamento e auditoria).
+- RBAC completo com identidade de usuário (JWT/OAuth2).
+- Métricas Prometheus e dashboards operacionais (SLO/SLI).
+- Workers assíncronos para cálculos analíticos pesados.
+- Alembic para versionamento de schema e migrações automatizadas.
 
 Autoria: Matheus Siqueira  
 Website: https://www.matheussiqueira.dev/

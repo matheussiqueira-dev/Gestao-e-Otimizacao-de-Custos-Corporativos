@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any
+from hashlib import sha256
+from typing import Any, Callable
 
 from app.core.config import get_settings
 
@@ -32,7 +33,11 @@ class RedisCache:
             return None
         if value is None:
             return None
-        return json.loads(value)
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            self._logger.warning("Cache payload decode failed for key=%s", key)
+            return None
 
     def set_json(self, key: str, payload: Any, ttl_seconds: int | None = None) -> None:
         if not self._enabled or not self._client:
@@ -42,10 +47,19 @@ class RedisCache:
         except Exception:
             self._logger.exception("Cache write failed for key=%s", key)
 
+    def get_or_set_json(self, key: str, loader: Callable[[], Any], ttl_seconds: int | None = None) -> Any:
+        cached = self.get_json(key)
+        if cached is not None:
+            return cached
+        fresh = loader()
+        self.set_json(key, fresh, ttl_seconds=ttl_seconds)
+        return fresh
+
     @staticmethod
     def build_key(prefix: str, **kwargs: Any) -> str:
         stable_payload = json.dumps(kwargs, sort_keys=True, default=str)
-        return f"{prefix}:{stable_payload}"
+        digest = sha256(stable_payload.encode("utf-8")).hexdigest()
+        return f"{prefix}:{digest}"
 
 
 cache = RedisCache()
